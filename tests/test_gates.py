@@ -63,9 +63,35 @@ class TestOutboundGuard:
         allowed, why = guard(CLEAN.replace("падает.", "падает. Мы помогли вырасти на 40%."))
         assert not allowed and "F4" in why
 
-    def test_unconfirmed_sender_blocked(self):
-        allowed, why = guard(CLEAN + " Мы в Camirix это решаем.")
-        assert not allowed and "S1" in why
+    def test_confirmed_sender_allowed(self):
+        # 22.09: пользователь договорился с Camirix, sender_identity стал
+        # confirmed. «Мы в Camirix» больше не блокируется.
+        allowed, _ = guard(CLEAN + " Мы в Camirix это решаем.")
+        assert allowed
+
+    def test_sender_blocked_when_unconfirmed(self, tmp_path, monkeypatch):
+        # Логика S1 всё ещё обязана блокировать, если статус когда-нибудь
+        # снова станет unconfirmed. Проверяем не через живой facts.yaml
+        # (он меняется), а через временную копию с изменённым статусом.
+        sys.path.insert(0, str(ROOT / ".claude" / "hooks"))
+        import outbound_guard as g
+
+        real = (ROOT / "camirix" / "facts.yaml").read_text(encoding="utf-8")
+        fake = real.replace(
+            "sender_identity:\n  status: confirmed",
+            "sender_identity:\n  status: unconfirmed",
+        )
+        assert fake != real, "не нашли sender_identity: status: confirmed в facts.yaml"
+        fake_facts = tmp_path / "facts.yaml"
+        fake_facts.write_text(fake, encoding="utf-8")
+        monkeypatch.setattr(g, "FACTS", fake_facts)
+
+        out = g.check_send({
+            "to": ["foodsafety@arianstar.ru"],
+            "subject": "Тема",
+            "body": CLEAN + " Мы в Camirix это решаем.",
+        })
+        assert any("S1" in r for r in out)
 
     def test_job_application_opener_to_generic_box_blocked(self):
         # МЕЙКИНИМ прочитали такое открытие как отклик соискателя.
