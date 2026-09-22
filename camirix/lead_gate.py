@@ -23,7 +23,6 @@ FAIL CLOSED: поля нет — это FAIL. Пустая строка не с�
 """
 import argparse
 import datetime as dt
-import re
 import sys
 from pathlib import Path
 
@@ -68,7 +67,8 @@ def check(lead):
             try:
                 age = (dt.date.today() - dt.date.fromisoformat(str(d))).days
                 if age > VACANCY_MAX_AGE_DAYS:
-                    p.append(f"L1 вакансия проверялась {age} дн. назад, лимит {VACANCY_MAX_AGE_DAYS}")
+                    p.append(f"L1 вакансия проверялась {age} дн. назад, "
+                             f"лимит {VACANCY_MAX_AGE_DAYS}")
                 elif age < 0:
                     p.append(f"L1 дата проверки в будущем: {d}")
             except ValueError:

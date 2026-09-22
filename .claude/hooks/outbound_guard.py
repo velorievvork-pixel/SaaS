@@ -36,7 +36,7 @@ MONEY = re.compile(
     r"(\d[\d\s ]{2,}\s*(?:₽|руб|р\.)|₽\s*\d|"
     r"\d+\s*(?:тыс|млн|тысяч|миллион)[а-я]*\s*(?:₽|руб)?|"
     r"\b29\s?000\b|\b49\s?000\b|\b69\s?000\b)",
-    re.I,
+    re.IGNORECASE,
 )
 
 SEND_TOOLS = {"mcp__Gmail__send_message", "mcp__Gmail__reply", "mcp__Gmail__forward"}
@@ -63,14 +63,14 @@ def facts_flag(key_path, want="confirmed"):
     except Exception:
         return False
     head = key_path.split(".")[0]
-    m = re.search(rf"^{re.escape(head)}:\s*$", text, re.M)
+    m = re.search(rf"^{re.escape(head)}:\s*$", text, re.MULTILINE)
     if not m:
         return False
     block = text[m.end():]
-    nxt = re.search(r"^\S", block, re.M)
+    nxt = re.search(r"^\S", block, re.MULTILINE)
     block = block[: nxt.start()] if nxt else block
     for seg in key_path.split(".")[1:]:
-        m2 = re.search(rf"^\s+{re.escape(seg)}:\s*$", block, re.M)
+        m2 = re.search(rf"^\s+{re.escape(seg)}:\s*$", block, re.MULTILINE)
         if not m2:
             return False
         block = block[m2.end():]
@@ -84,13 +84,13 @@ def facts_value(section, key):
         text = FACTS.read_text(encoding="utf-8")
     except Exception:
         return None
-    m = re.search(rf"^{re.escape(section)}:\s*$", text, re.M)
+    m = re.search(rf"^{re.escape(section)}:\s*$", text, re.MULTILINE)
     if not m:
         return None
     block = text[m.end():]
-    nxt = re.search(r"^\S", block, re.M)
+    nxt = re.search(r"^\S", block, re.MULTILINE)
     block = block[: nxt.start()] if nxt else block
-    m2 = re.search(rf"^\s+{re.escape(key)}:\s*$", block, re.M)
+    m2 = re.search(rf"^\s+{re.escape(key)}:\s*$", block, re.MULTILINE)
     if not m2:
         return None
     block = block[m2.end():]
@@ -115,7 +115,8 @@ def check_send(ti):
     m = MONEY.search(subject + "\n" + body)
     if m:
         hit = m.group(0).strip()
-        anchor = facts_value("pricing", "quotable_anchor") if facts_flag("pricing.quotable_anchor") else None
+        anchor = (facts_value("pricing", "quotable_anchor")
+                  if facts_flag("pricing.quotable_anchor") else None)
         if not anchor or anchor not in (subject + "\n" + body):
             out.append(
                 f"F1 сумма «{hit}» в тексте. Прайса нет: цену Артём называет на звонке "
@@ -128,7 +129,8 @@ def check_send(ti):
     # F4 — выдуманные результаты
     for p in FABRICATION:
         if p in blob:
-            out.append(f"F4 «{p}» — у Camirix нет измеренных результатов и нет разрешения называть клиентов")
+            out.append(f"F4 «{p}» — у Camirix нет измеренных результатов "
+                       "и нет разрешения называть клиентов")
 
     # F5 — чужая статистика
     for p in THIRD_PARTY_STATS:
@@ -142,7 +144,8 @@ def check_send(ti):
 
     # S1 — отправитель
     if not facts_flag("sender_identity") and re.search(r"мы в camirix|наша компания camirix", blob):
-        out.append("S1 «мы в Camirix» от неподтверждённого отправителя — sender_identity не confirmed")
+        out.append("S1 «мы в Camirix» от неподтверждённого отправителя — "
+                   "sender_identity не confirmed")
 
     # S2 — открытие про вакансию на общий ящик
     to = " ".join(ti.get("to") or []).lower()

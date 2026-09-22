@@ -63,11 +63,11 @@ def candidates(fio, domain):
         pats += [f"{f}{m}{last}", f"{f}.{m}.{last}", f"{last}{f}{m}"]
 
     seen, out = set(), []
-    for p in pats:
-        p = re.sub(r"[^a-z0-9._-]", "", p)
-        if p and p not in seen:
-            seen.add(p)
-            out.append(f"{p}@{d}")
+    for raw in pats:
+        local = re.sub(r"[^a-z0-9._-]", "", raw)
+        if local and local not in seen:
+            seen.add(local)
+            out.append(f"{local}@{d}")
     return out
 
 

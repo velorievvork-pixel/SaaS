@@ -8,11 +8,25 @@
       "mcp__Parallel_Search_Pro__web_fetch",
       "Bash(python3 /home/user/SaaS/camirix/*)",
       "Bash(python3 /home/user/SaaS/.claude/hooks/*)",
+      "Bash(python3 -m pytest*)",
+      "Bash(python3 -m ruff*)",
       "Read(camirix/**)",
       "Edit(camirix/**)"
     ]
   },
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh",
+            "timeout": 300,
+            "statusMessage": "Установка зависимостей проекта"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "mcp__Gmail__send_message|mcp__Gmail__reply|mcp__Gmail__forward",
