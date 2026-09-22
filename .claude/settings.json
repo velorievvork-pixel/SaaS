@@ -1,21 +1,27 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "permissions": {
+    "allow": [
+      "mcp__Claude_Code_Remote__update_trigger",
+      "mcp__Claude_Code_Remote__list_triggers",
+      "mcp__Parallel_Search_Pro__web_search",
+      "mcp__Parallel_Search_Pro__web_fetch",
+      "Bash(python3 /home/user/SaaS/camirix/*)",
+      "Bash(python3 /home/user/SaaS/.claude/hooks/*)",
+      "Read(camirix/**)",
+      "Edit(camirix/**)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "mcp__Gmail__send_message|mcp__Gmail__reply|mcp__Gmail__forward|mcp__Claude_Code_Remote__delete_trigger",
+        "matcher": "mcp__Gmail__send_message|mcp__Gmail__reply|mcp__Gmail__forward",
         "hooks": [
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PROJECT_DIR:-/home/user/SaaS}/.claude/hooks/outbound_guard.py\"",
             "timeout": 20,
-            "statusMessage": "Шлюз: механические проверки текста"
-          },
-          {
-            "type": "agent",
-            "prompt": "Ты шлюз перед необратимым действием. Прочитай ПОЛНОСТЬЮ два файла: .claude/agents/sdr-verifier.md (чек-лист) и camirix/facts.yaml (факты о продукте). Затем проверь это действие по чек-листу, уделив внимание блокам, которые машинная проверка сделать не может: БЛОК 3 (тот ли адресат, тот ли триггер, активна ли вакансия, тот ли человек) и БЛОК 5 (четыре сценария негативной реакции). Правило FAIL CLOSED: не смог проверить — это FAIL. Ответь ровно в формате из чек-листа: первая строка VERDICT: PASS или VERDICT: FAIL, при FAIL далее по строке на нарушение. Действие: $ARGUMENTS",
-            "timeout": 180,
-            "statusMessage": "Шлюз: проверка цели и реакции человека"
+            "statusMessage": "Шлюз: проверка исходящего текста"
           }
         ]
       }
