@@ -78,6 +78,29 @@ def facts_flag(key_path, want="confirmed"):
     return bool(st and st.group(1) == want)
 
 
+def facts_value(section, key):
+    """Точное значение value у подсекции. Нечитаемо -> None (шлюз тогда блокирует)."""
+    try:
+        text = FACTS.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    m = re.search(rf"^{re.escape(section)}:\s*$", text, re.M)
+    if not m:
+        return None
+    block = text[m.end():]
+    nxt = re.search(r"^\S", block, re.M)
+    block = block[: nxt.start()] if nxt else block
+    m2 = re.search(rf"^\s+{re.escape(key)}:\s*$", block, re.M)
+    if not m2:
+        return None
+    block = block[m2.end():]
+    v = re.search(r"value:\s*(.+)", block)
+    if not v:
+        return None
+    val = v.group(1).strip().strip('"').strip("'")
+    return None if val in ("null", "~", "") else val
+
+
 def check_send(ti):
     body = ti.get("body") or ti.get("text") or ""
     subject = ti.get("subject") or ""
@@ -86,10 +109,17 @@ def check_send(ti):
     blob = (subject + "\n" + body).lower()
     out = []
 
-    # F1 — цена, пока актуальная не подтверждена
-    if not facts_flag("pricing.current_price") and MONEY.search(subject + "\n" + body):
-        hit = MONEY.search(subject + "\n" + body).group(0).strip()
-        out.append(f"F1 цена «{hit}» в тексте, а pricing.current_price ещё не confirmed в facts.yaml")
+    # F1 — сумма в исходящем. Цену называет Артём на звонке под запрос,
+    # прайса не существует, поэтому сумма запрещена всегда. Исключение —
+    # только точная строка из pricing.quotable_anchor со status: confirmed.
+    m = MONEY.search(subject + "\n" + body)
+    if m:
+        hit = m.group(0).strip()
+        anchor = facts_value("pricing", "quotable_anchor") if facts_flag("pricing.quotable_anchor") else None
+        if not anchor or anchor not in (subject + "\n" + body):
+            out.append(
+                f"F1 сумма «{hit}» в тексте. Прайса нет: цену Артём называет на звонке "
+                f"под запрос покупателя. Назвать цифру — связать ему руки на переговорах")
 
     # F3 — 7 дней бесплатно, пока не подтверждено
     if not facts_flag("trial") and re.search(r"(7|семь)\s*дн", blob):
