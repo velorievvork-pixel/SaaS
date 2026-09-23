@@ -135,6 +135,9 @@ contact: {channel: email, value: v.rimskiykorsakov@konik.ru, how_found: contact_
 signal: {type: массовый наём, quote: "обработка входящих заявок от оптовых клиентов",
          source_url: "https://hh.ru/vacancy/1"}
 process_to_automate: обработка входящих оптовых заявок и оформление отгрузки
+identity_check: >
+  юр.адрес в карточке checko.ru совпадает с адресом на сайте konik.ru,
+  в футере сайта указан тот же ИНН 7802361565
 """.replace("{today}", dt.date.today().isoformat()))
 
 
@@ -217,6 +220,18 @@ class TestLeadGate:
         from lead_gate import check
         good_lead["decision_maker"]["role"] = "финансовый директор"
         assert any(p.startswith("L3") for p in check(good_lead))
+
+    def test_missing_identity_check_rejected(self, good_lead):
+        # 23.09: дважды чуть не взял тёзку (книгоиздательская «Группа Традиция»
+        # вместо промышленного холдинга, «Food City» вместо «Food City Group»).
+        from lead_gate import check
+        del good_lead["identity_check"]
+        assert any(p.startswith("L8") for p in check(good_lead))
+
+    def test_stub_identity_check_rejected(self, good_lead):
+        from lead_gate import check
+        good_lead["identity_check"] = "да"
+        assert any(p.startswith("L8") for p in check(good_lead))
 
 
 class TestContactFinder:
