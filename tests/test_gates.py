@@ -180,6 +180,44 @@ class TestLeadGate:
         from lead_gate import check
         assert len(check({})) >= 7
 
+    def test_ru_lead_without_revenue_rejected(self, good_lead):
+        # РФ: audit-it.ru отдаёт выручку бесплатно, поэтому для РФ она обязательна.
+        from lead_gate import check
+        del good_lead["firmographics"]["revenue_mln_rub"]
+        assert any(p.startswith("L2") for p in check(good_lead))
+
+    def test_non_ru_lead_without_revenue_passes(self, good_lead):
+        # СНГ вне РФ: агрегаторы часто прячут финансы за платным отчётом (23.09,
+        # решение пользователя на примере AZMT/Казахстан) — численности достаточно.
+        from lead_gate import check
+        good_lead["country"] = "KZ"
+        del good_lead["firmographics"]["revenue_mln_rub"]
+        assert check(good_lead) == []
+
+    def test_low_end_of_widened_icp_passes(self, good_lead):
+        # Нижняя граница снижена с 30 до 20 — 23.09, решение пользователя.
+        from lead_gate import check
+        good_lead["firmographics"]["headcount"] = 21
+        assert check(good_lead) == []
+
+    def test_below_widened_icp_floor_rejected(self, good_lead):
+        from lead_gate import check
+        good_lead["firmographics"]["headcount"] = 19
+        assert any(p.startswith("L6") for p in check(good_lead))
+
+    def test_bare_director_title_accepted(self, good_lead):
+        # ТОО (Казахстан и часть СНГ): «Директор» — стандартный титул первого лица,
+        # не «коммерческий директор» из батча №1.
+        from lead_gate import check
+        good_lead["decision_maker"]["role"] = "Директор"
+        assert check(good_lead) == []
+
+    def test_commercial_director_still_rejected(self, good_lead):
+        # Составной титул с «директор» не должен проскакивать через L3 по подстроке.
+        from lead_gate import check
+        good_lead["decision_maker"]["role"] = "финансовый директор"
+        assert any(p.startswith("L3") for p in check(good_lead))
+
 
 class TestContactFinder:
     @pytest.mark.parametrize("fio,expected", [

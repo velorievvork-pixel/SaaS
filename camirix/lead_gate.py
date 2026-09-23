@@ -9,7 +9,7 @@
 
 Проверок семь:
   L1  вакансия активна и проверена недавно   (оба «лучших кандидата» оказались архивными)
-  L2  численность и выручка со ссылкой        (брались на глаз)
+  L2  численность и выручка со ссылкой        (выручка обязательна только для РФ)
   L3  ЛПР назван по имени и это первое лицо   (писали РОПам и в никуда)
   L4  контакт личный, а не общий ящик         (13 писем из 20 ушли на info@)
   L5  цитата сигнала дословная, со ссылкой    (цитаты пересказывались)
@@ -35,9 +35,10 @@ except ImportError:
 GENERIC = ("info", "mail", "office", "sales", "zakaz", "hello", "ask", "pr",
            "support", "inbox", "contact", "shop", "moscow", "spb", "kazan", "almaty")
 
-ICP_HEAD = (30, 150)
+ICP_HEAD = (20, 150)  # нижняя граница снижена с 30 до 20 — 23.09, СНГ, решение пользователя
 ICP_REV_MLN = (100, 3000)
 VACANCY_MAX_AGE_DAYS = 7
+RU_DEFAULT_COUNTRY = "RU"
 
 DECIDER_OK = ("собственник", "учредител", "генеральн", "гендиректор", "director",
               "основател", "владелец", "founder", "ceo")
@@ -74,13 +75,19 @@ def check(lead):
             except ValueError:
                 p.append(f"L1 дата проверки не разобрана: {d}")
 
-    # L2 — численность и выручка со ссылкой
+    # L2 — численность и выручка со ссылкой. Выручка обязательна только для России:
+    # audit-it.ru отдаёт её бесплатно. В остальном СНГ агрегаторы (statsnet.co и т.п.)
+    # прячут финансы за платным отчётом — 23.09, решение пользователя: там численности
+    # и отраслевого источника достаточно, без выручки.
     f = lead.get("firmographics") or {}
-    for key, label in (("headcount", "численность"), ("revenue_mln_rub", "выручка")):
-        if not has(f.get(key)):
-            p.append(f"L2 не указана {label}")
+    country = str(lead.get("country") or RU_DEFAULT_COUNTRY).upper()
+    required = ("headcount", "численность")
+    if not has(f.get(required[0])):
+        p.append(f"L2 не указана {required[1]}")
+    if country == RU_DEFAULT_COUNTRY and not has(f.get("revenue_mln_rub")):
+        p.append("L2 не указана выручка")
     if not has(f.get("source_url")):
-        p.append("L2 нет ссылки на источник численности и выручки — на глаз не считается")
+        p.append("L2 нет ссылки на источник численности (и выручки для РФ) — на глаз не считается")
 
     # L3 — ЛПР назван и это первое лицо
     dm = lead.get("decision_maker") or {}
@@ -88,12 +95,16 @@ def check(lead):
     role = str(dm.get("role", "")).lower()
     if not has(name) or len(name.split()) < 2:
         p.append("L3 ЛПР не назван по имени и фамилии")
+    # Бэрe «директор» — стандартный титул первого лица в ТОО (Казахстан и часть СНГ),
+    # аналог «генеральный директор» в РФ. Считается OK только как отдельное слово,
+    # а не как часть составного «коммерческий/финансовый директор» — те остаются в BAD.
+    is_ok_role = any(g in role for g in DECIDER_OK) or role.strip() == "директор"
     if not has(role):
         p.append("L3 не указана должность ЛПР")
-    elif any(b in role for b in DECIDER_BAD) and not any(g in role for g in DECIDER_OK):
+    elif any(b in role for b in DECIDER_BAD) and not is_ok_role:
         p.append(f"L3 должность «{dm.get('role')}» — решение «расти без расширения "
                  "штата» принимает тот, у кого ФОТ в отчётности, а не продажи")
-    elif not any(g in role for g in DECIDER_OK):
+    elif not is_ok_role:
         p.append(f"L3 должность «{dm.get('role')}» не распознана как первое лицо")
 
     # L4 — контакт личный

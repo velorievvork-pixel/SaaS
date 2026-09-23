@@ -2,8 +2,9 @@
 # Пустое поле = FAIL. Поле «не найдено» тоже FAIL — это честно, но не готово.
 
 company: ""            # ООО «Название»
-inn: ""                # ИНН — по нему ЕГРЮЛ отдаёт гендиректора
+inn: ""                # ИНН/БИН — по нему реестр отдаёт первое лицо
 domain: ""             # example.ru
+country: "RU"          # RU | KZ | BY | ... Вне RU выручка в firmographics не обязательна
 about: ""              # чем занимается, одной строкой
 
 vacancy:
@@ -14,9 +15,9 @@ vacancy:
   salary: ""           # вилка, если указана — это цифра адресата, её можно называть
 
 firmographics:
-  headcount: 0         # ICP 30-150
-  revenue_mln_rub: 0   # ICP 100-3000 млн ₽
-  source_url: ""       # checko.ru / rusprofile.ru / audit-it.ru / kompra.kz / сайт
+  headcount: 0         # ICP 20-150
+  revenue_mln_rub: 0   # ICP 100-3000 млн ₽. Обязательно для RU, необязательно для остального СНГ
+  source_url: ""       # checko.ru / audit-it.ru / statsnet.co / kompra.kz / сайт
 
 decision_maker:
   name: ""             # Фамилия Имя Отчество. ЕГРЮЛ отдаёт по ИНН
