@@ -257,6 +257,9 @@ def main():
                     help=f"список неотправленных лидов, чью вакансию пора перепроверить "
                          f"(проверка старше {RECHECK_AFTER_DAYS} дн.)")
     a = ap.parse_args()
+    # _TEMPLATE.yaml и прочие файлы с «_» — заготовки, не лиды: при глобе
+    # leads/*.yaml они шли в счёт «не готовы» и прятали настоящие провалы.
+    a.files = [f for f in a.files if not Path(f).name.startswith("_")]
 
     if a.recheck:
         due = 0

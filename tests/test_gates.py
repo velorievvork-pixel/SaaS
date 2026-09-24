@@ -474,3 +474,12 @@ class TestWaInbox:
             {"id": "welding-company-kz", "version": 2, "data": self.ROWS[0]}), encoding="utf-8")
         rows = wa_inbox.load_outbox(tmp_path)
         assert rows[0]["id"] == "welding-company-kz" and rows[0]["version"] == 2
+
+
+class TestTemplateSkipped:
+    def test_glob_ignores_template(self):
+        leads = sorted(str(p) for p in (ROOT / "camirix" / "leads").glob("*.yaml"))
+        r = subprocess.run([sys.executable, str(ROOT / "camirix" / "lead_gate.py"), *leads,
+                            "--brief"], capture_output=True, text=True)
+        assert "_TEMPLATE" not in r.stdout
+        assert f"из {len(leads) - 1}" in r.stdout
