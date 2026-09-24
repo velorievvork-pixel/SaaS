@@ -16,7 +16,32 @@
 """
 import argparse
 
-CONTRIB = 1.3  # страховые взносы, грубо
+# Страховые взносы. 24.09 выяснилось, что плоские 30% дают ложное «расхождение >30%»
+# у малого бизнеса: у МСП 30% берутся только с части зарплаты до порога, выше — 15%.
+# С 2025 порог 1,5 МРОТ, до 2025 — 1 МРОТ. Остальные платят 30% до предельной базы
+# и 15,1% сверх неё. Взносы на травматизм (≈0,2%) не учитываются.
+MROT = {2023: 16_242, 2024: 19_242, 2025: 22_440, 2026: 27_093}
+LIMIT_YEAR = {2023: 1_917_000, 2024: 2_225_000, 2025: 2_759_000, 2026: 2_979_000}
+MSP_HEAD, MSP_REV_MLN = 250, 2000  # критерии среднего предприятия
+
+
+def is_msp(headcount, revenue_mln):
+    return headcount <= MSP_HEAD and revenue_mln <= MSP_REV_MLN
+
+
+def monthly_contrib(salary, year, msp):
+    """Взносы работодателя с одной среднемесячной зарплаты, ₽."""
+    y = min(max(year, min(MROT)), max(MROT))
+    if msp:
+        base = MROT[y] * (1.5 if y >= 2025 else 1.0)
+        return 0.30 * min(salary, base) + 0.15 * max(salary - base, 0)
+    lim = LIMIT_YEAR[y] / 12
+    return 0.30 * min(salary, lim) + 0.151 * max(salary - lim, 0)
+
+
+def annual_fot(headcount, salary, year, msp):
+    """Годовой ФОТ с взносами."""
+    return headcount * 12 * (salary + monthly_contrib(salary, year, msp))
 
 
 def fmt_rub(v):
@@ -37,23 +62,32 @@ def main():
     ap.add_argument("--revenue-prev", type=float, help="выручка за предыдущий год, млн ₽")
     ap.add_argument("--contributions", type=float,
                     help="уплаченные страховые взносы, млн ₽ — для независимой сверки")
+    ap.add_argument("--year", type=int, default=2025, help="год последних данных (ставки взносов)")
+    msp_g = ap.add_mutually_exclusive_group()
+    msp_g.add_argument("--msp", dest="msp", action="store_true", default=None,
+                       help="считать по пониженным ставкам МСП")
+    msp_g.add_argument("--no-msp", dest="msp", action="store_false")
     a = ap.parse_args()
 
-    fot = a.headcount * a.salary * 12 * CONTRIB
+    msp = is_msp(a.headcount, a.revenue) if a.msp is None else a.msp
+    fot = annual_fot(a.headcount, a.salary, a.year, msp)
     rev = a.revenue * 1e6
     share = fot / rev * 100 if rev else 0
 
     salary_str = f"{a.salary:,.0f}".replace(",", " ")
-    print(f"ФОТ за год:        {fmt_rub(fot)}  ({a.headcount} чел. × "
-          f"{salary_str} ₽ × 12 × {CONTRIB})")
+    rate = monthly_contrib(a.salary, a.year, msp) / a.salary * 100
+    rate_str = f"{rate:.1f}".replace(".", ",")
+    print(f"ФОТ за год:        {fmt_rub(fot)}  ({a.headcount} чел. × {salary_str} ₽ × 12, "
+          f"взносы {rate_str}% — {'МСП' if msp else 'общие ставки'}, {a.year})")
     print(f"Выручка:           {fmt_rub(rev)}")
     print(f"ФОТ от выручки:    {share:.1f}%".replace(".", ","))
 
     if a.contributions:
-        implied = a.contributions * 1e6 / 0.3
-        delta = abs(implied - fot / CONTRIB) / (fot / CONTRIB) * 100
-        print(f"\nСверка по взносам: фонд ≈ {fmt_rub(implied)}, "
-              f"расхождение с расчётом {delta:.0f}%".replace(".", ","))
+        expected = a.headcount * 12 * monthly_contrib(a.salary, a.year, msp)
+        actual = a.contributions * 1e6
+        delta = abs(expected - actual) / actual * 100
+        print(f"\nСверка по взносам: по расчёту {fmt_rub(expected)}, уплачено {fmt_rub(actual)}, "
+              f"расхождение {delta:.0f}%".replace(".", ","))
         if delta > 30:
             print("  расхождение велико — перепроверить ССЧ или среднюю ЗП, "
                   "в письме такую цифру не называть")
@@ -63,7 +97,7 @@ def main():
         rev_d = (a.revenue - a.revenue_prev) / a.revenue_prev * 100
         hc_prev = a.headcount_prev or a.headcount
         sal_prev = a.salary_prev or a.salary
-        fot_prev = hc_prev * sal_prev * 12 * CONTRIB
+        fot_prev = annual_fot(hc_prev, sal_prev, a.year - 1, msp)
         fot_d = (fot - fot_prev) / fot_prev * 100 if fot_prev else 0
 
         print("\nДинамика год к году:")

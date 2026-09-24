@@ -348,3 +348,25 @@ class TestStaffFinder:
         got = {r["email"]: r for r in extract(t, "firma.ru")}
         assert got["sidorov@firma.ru"]["level"] == "top"
         assert got["kozlova@firma.ru"]["level"] == "staff"
+
+
+class TestFotContributions:
+    """fot.py: 24.09 плоские 30% давали ложное расхождение >30% у МСП (КЗПУ 37%, Плитстройторг 43%)."""
+
+    def test_msp_reduced_rate_above_threshold(self):
+        from fot import monthly_contrib
+        # 2025: 30% до 1,5 МРОТ (33 660 ₽), 15% сверх
+        assert round(monthly_contrib(71_400, 2025, True)) == round(0.3 * 33_660 + 0.15 * (71_400 - 33_660))
+
+    def test_kzpu_contributions_now_reconcile(self):
+        from fot import monthly_contrib
+        expected = 83 * 12 * monthly_contrib(71_400, 2025, True)
+        assert abs(expected - 13.5e6) / 13.5e6 < 0.30
+
+    def test_non_msp_flat_30_below_limit(self):
+        from fot import monthly_contrib
+        assert monthly_contrib(100_000, 2025, False) == 30_000
+
+    def test_msp_detection(self):
+        from fot import is_msp
+        assert is_msp(114, 1819) and not is_msp(528, 900) and not is_msp(100, 4100)
