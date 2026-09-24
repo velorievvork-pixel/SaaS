@@ -370,3 +370,16 @@ class TestFotContributions:
     def test_msp_detection(self):
         from fot import is_msp
         assert is_msp(114, 1819) and not is_msp(528, 900) and not is_msp(100, 4100)
+
+
+class TestDuplicateKeys:
+    """24.09: пустой verified_on ниже по файлу перетирал заполненный."""
+
+    def test_duplicate_key_rejected(self):
+        from lead_gate import load_lead
+        with pytest.raises(yaml.constructor.ConstructorError):
+            load_lead('verified_on: "2026-09-24"\ncompany: X\nverified_on: ""\n')
+
+    def test_unique_keys_load(self):
+        from lead_gate import load_lead
+        assert load_lead('company: X\nverified_on: "2026-09-24"\n')["company"] == "X"

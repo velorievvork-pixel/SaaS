@@ -61,6 +61,30 @@ DECIDER_BAD = ("роп", "руководитель отдела продаж", "
                "менеджер", "hr", "рекрутер")
 
 
+class _NoDupLoader(yaml.SafeLoader):
+    """Повторный ключ — ошибка. 24.09 пустой verified_on из шаблона ниже по файлу
+    молча перетёр заполненный выше: PyYAML берёт последнее значение без предупреждения."""
+
+
+def _no_dup_mapping(loader, node, deep=False):
+    seen = set()
+    for k_node, _ in node.value:
+        k = loader.construct_object(k_node, deep=deep)
+        if k in seen:
+            raise yaml.constructor.ConstructorError(
+                None, None, f"ключ «{k}» повторяется — второе значение перетрёт первое",
+                k_node.start_mark)
+        seen.add(k)
+    return loader.construct_mapping(node, deep=deep)
+
+
+_NoDupLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_dup_mapping)
+
+
+def load_lead(text):
+    return yaml.load(text, Loader=_NoDupLoader) or {}
+
+
 def has(v):
     return v is not None and str(v).strip() not in ("", "None", "null", "~", "не найдено")
 
@@ -238,7 +262,7 @@ def main():
         due = 0
         for fp in a.files:
             try:
-                lead = yaml.safe_load(Path(fp).read_text(encoding="utf-8")) or {}
+                lead = load_lead(Path(fp).read_text(encoding="utf-8"))
             except Exception:
                 continue
             if has(lead.get("sent_on")) or not lead.get("company"):
@@ -260,7 +284,7 @@ def main():
     for fp in a.files:
         path = Path(fp)
         try:
-            lead = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            lead = load_lead(path.read_text(encoding="utf-8"))
         except Exception as e:
             print(f"✗ {path.name}: файл не разобран ({e}) — FAIL CLOSED")
             bad += 1
