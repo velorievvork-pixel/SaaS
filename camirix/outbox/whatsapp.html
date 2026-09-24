@@ -1,0 +1,250 @@
+<title>Отправить сегодня</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F6F4F1; --surface:#FFFFFF; --ink:#1D1B19; --ink-2:#5E5852; --line:#E4DFD8;
+  --accent:#C2521E; --accent-ink:#FFFFFF;
+  --wa:#1E8A4C; --wa-bg:#E6F4EC;
+  --warn:#9A6A00; --warn-bg:#FBF1D9;
+  --bad:#A33A2E; --bad-bg:#F9E6E3;
+  --info:#2F5E8C; --info-bg:#E5EEF7;
+  --mute-bg:#EFEBE6;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#151311; --surface:#1E1B18; --ink:#EEE8E1; --ink-2:#A89F95; --line:#34302B;
+    --accent:#E0763F; --accent-ink:#1A0E07;
+    --wa:#4CC382; --wa-bg:#16301F;
+    --warn:#E3B34D; --warn-bg:#342A12;
+    --bad:#EE8A7D; --bad-bg:#3A1D19;
+    --info:#86B4E3; --info-bg:#1B2A3A;
+    --mute-bg:#2A2622;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#151311; --surface:#1E1B18; --ink:#EEE8E1; --ink-2:#A89F95; --line:#34302B;
+  --accent:#E0763F; --accent-ink:#1A0E07;
+  --wa:#4CC382; --wa-bg:#16301F;
+  --warn:#E3B34D; --warn-bg:#342A12;
+  --bad:#EE8A7D; --bad-bg:#3A1D19;
+  --info:#86B4E3; --info-bg:#1B2A3A;
+  --mute-bg:#2A2622;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans);padding-inline:16px;padding-block:20px 48px}
+.wrap{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-direction:column;gap:6px}
+h1{font-size:24px;font-weight:600;margin:0;text-wrap:balance}
+.sub{color:var(--ink-2);margin:0;max-width:62ch}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tab{all:unset;cursor:pointer;padding:7px 12px;border-radius:999px;border:1px solid var(--line);font-size:13.5px;color:var(--ink-2);background:var(--surface)}
+.tab[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.tab b{font-family:var(--mono);font-weight:500;margin-left:4px}
+.tab:focus-visible,.btn:focus-visible,.chip:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.list{display:flex;flex-direction:column;gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.top{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline}
+.co{font-weight:600;font-size:17px}
+.cc{font-family:var(--mono);font-size:12px;color:var(--ink-2);margin-left:6px}
+.lpr{color:var(--ink-2);font-size:13.5px}
+.pill{font-size:12px;font-weight:500;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.s-new{background:var(--mute-bg);color:var(--ink-2)}
+.s-sent{background:var(--info-bg);color:var(--info)}
+.s-replied{background:var(--wa-bg);color:var(--wa)}
+.s-silent{background:var(--warn-bg);color:var(--warn)}
+.s-no_whatsapp,.s-refused{background:var(--bad-bg);color:var(--bad)}
+.num{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.num code{font-family:var(--mono);font-size:15px;user-select:all}
+.msg{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;white-space:pre-wrap;font-size:14.5px;max-width:68ch}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:9px 14px;border-radius:8px;font-weight:500;font-size:14px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.btn.wa{background:var(--wa);border-color:var(--wa);color:#fff}
+:root[data-theme="dark"] .btn.wa{color:#0B1A11}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .btn.wa{color:#0B1A11} }
+.btn.small{padding:5px 10px;font-size:12.5px}
+.btn[aria-disabled="true"]{opacity:.5;pointer-events:none}
+.status{display:flex;gap:6px;flex-wrap:wrap}
+.chip{all:unset;cursor:pointer;font-size:12.5px;padding:5px 10px;border-radius:6px;border:1px solid var(--line);color:var(--ink-2)}
+.chip[aria-pressed="true"]{border-color:var(--ink);color:var(--ink);font-weight:600}
+.reply{display:flex;flex-direction:column;gap:6px}
+.reply label{font-size:12px;color:var(--ink-2);letter-spacing:.02em}
+textarea{font:inherit;font-size:14px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px;min-height:62px;resize:vertical;width:100%}
+.note{font-size:13px;color:var(--ink-2)}
+.note a{color:var(--accent)}
+.hist{font-size:12.5px;color:var(--ink-2);border-top:1px dashed var(--line);padding-top:8px;display:flex;flex-direction:column;gap:4px}
+.hist b{font-family:var(--mono);font-weight:500}
+.empty,.banner{color:var(--ink-2);padding:14px;border:1px dashed var(--line);border-radius:10px;text-align:center}
+.banner{text-align:left}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13.5px}
+@media (prefers-reduced-motion: no-preference){ .card{transition:border-color .2s} }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Отправить сегодня</h1>
+    <p class="sub">Лиды Camirix для WhatsApp. «Открыть WhatsApp» открывает чат с уже вставленным текстом, остаётся нажать «Отправить». После этого отметьте статус. Если ответили, вставьте ответ: я увижу его и подготовлю следующий шаг.</p>
+  </header>
+  <div class="tabs" role="group" aria-label="Фильтр">
+    <button class="tab" id="tab-todo" data-f="todo" aria-pressed="true">К отправке<b id="c-todo">0</b></button>
+    <button class="tab" id="tab-wait" data-f="wait" aria-pressed="false">Ждём ответа<b id="c-wait">0</b></button>
+    <button class="tab" id="tab-done" data-f="done" aria-pressed="false">Ответили<b id="c-done">0</b></button>
+    <button class="tab" id="tab-all" data-f="all" aria-pressed="false">Все<b id="c-all">0</b></button>
+  </div>
+  <div id="banner" class="banner" hidden></div>
+  <div id="list" class="list"><div class="empty">Загружаю лидов…</div></div>
+</div>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+const STATUS = [
+  ["new","Не отправлено"],["sent","Отправил"],["replied","Ответили"],
+  ["silent","Молчат"],["no_whatsapp","Нет WhatsApp"],["refused","Отказ"]
+];
+const LABEL = Object.fromEntries(STATUS);
+const GROUP = { todo:["new"], wait:["sent","silent"], done:["replied","refused"], all:null };
+let rows = [], filter = "todo", db = null, readOnly = false;
+const drafts = {};
+
+function toast(t){
+  const el = document.getElementById("toast");
+  el.textContent = t; el.hidden = false;
+  clearTimeout(toast.t); toast.t = setTimeout(()=>{ el.hidden = true; }, 1800);
+}
+async function copy(text, btn){
+  try { await navigator.clipboard.writeText(text); toast("Скопировано"); }
+  catch(e){
+    const r = document.createRange(); const n = btn.closest(".card").querySelector(".msg");
+    r.selectNodeContents(n); const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    toast("Выделено — скопируйте вручную");
+  }
+}
+function waLink(phone, text){
+  const d = String(phone || "").replace(/\D/g, "");
+  return d ? "https://wa.me/" + d + "?text=" + encodeURIComponent(text || "") : null;
+}
+function fmt(ts){
+  if (!ts) return "";
+  try { return new Date(ts).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}); }
+  catch(e){ return ""; }
+}
+function el(tag, attrs, kids){
+  const n = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs || {})){
+    if (k === "text") n.textContent = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+  }
+  (kids || []).forEach(c => c && n.appendChild(c));
+  return n;
+}
+
+async function setStatus(r, s){
+  if (!db || readOnly || r.status === s) return;
+  const hist = Array.isArray(r.history) ? r.history.slice(-19) : [];
+  hist.push({ at: new Date().toISOString(), text: LABEL[s] });
+  try { await db.doc("outbox/" + r.id).update({ status: s, updated_at: new Date().toISOString(), history: hist }); toast("Статус: " + LABEL[s]); }
+  catch(e){ if (e && e.code === "invalid_argument") { readOnly = true; render(); } toast("Не сохранилось, попробуйте ещё раз"); }
+}
+async function saveReply(r){
+  if (!db || readOnly) return;
+  const text = (drafts[r.id] ?? r.reply ?? "").trim();
+  if (text === (r.reply || "")) { toast("Без изменений"); return; }
+  const upd = { reply: text, updated_at: new Date().toISOString() };
+  if (text && r.status !== "replied" && r.status !== "refused") upd.status = "replied";
+  try { await db.doc("outbox/" + r.id).update(upd); delete drafts[r.id]; toast("Ответ сохранён"); }
+  catch(e){ toast("Не сохранилось, попробуйте ещё раз"); }
+}
+
+function card(r){
+  const link = waLink(r.phone, r.message);
+  const c = el("article", { class:"card" });
+  c.appendChild(el("div", { class:"top" }, [
+    el("div", {}, [ el("span", { class:"co", text:r.company || "" }), el("span", { class:"cc", text:r.country || "" }) ]),
+    el("span", { class:"pill s-" + (r.status || "new"), text: LABEL[r.status] || "Не отправлено" })
+  ]));
+  if (r.lpr) c.appendChild(el("div", { class:"lpr", text:"Для кого: " + r.lpr }));
+  if (r.phone) c.appendChild(el("div", { class:"num" }, [
+    el("code", { text:r.phone }),
+    el("button", { class:"btn small", type:"button", onclick:(e)=>{ copyPlain(r.phone); } , text:"Копировать номер" })
+  ]));
+  if (r.message){
+    c.appendChild(el("div", { class:"msg", text:r.message }));
+    const acts = el("div", { class:"actions" });
+    if (link) acts.appendChild(el("a", { class:"btn wa", href:link, target:"_blank", rel:"noopener", text:"Открыть WhatsApp" }));
+    acts.appendChild(el("button", { class:"btn", type:"button", onclick:(e)=>copy(r.message, e.currentTarget), text:"Копировать текст" }));
+    c.appendChild(acts);
+  }
+  if (r.note) c.appendChild(el("div", { class:"note", text:r.note }));
+  if (r.alt_url) c.appendChild(el("div", { class:"note" }, [ document.createTextNode("Запасной канал: "), el("a", { href:r.alt_url, target:"_blank", rel:"noopener", text:r.alt_label || r.alt_url }) ]));
+
+  const st = el("div", { class:"status", role:"group", "aria-label":"Статус" });
+  STATUS.forEach(([k,l]) => st.appendChild(el("button", {
+    class:"chip", type:"button", "aria-pressed": String(r.status === k),
+    onclick:()=>setStatus(r, k), text:l, ...(readOnly ? { disabled:"" } : {})
+  })));
+  c.appendChild(st);
+
+  const id = "reply-" + r.id;
+  const ta = el("textarea", { id, placeholder:"Вставьте, что ответили, дословно", ...(readOnly ? { readonly:"" } : {}) });
+  ta.value = drafts[r.id] ?? r.reply ?? "";
+  ta.addEventListener("input", () => { drafts[r.id] = ta.value; });
+  c.appendChild(el("div", { class:"reply" }, [
+    el("label", { for:id, text:"Ответ" }), ta,
+    el("div", { class:"actions" }, [ el("button", { class:"btn small", type:"button", onclick:()=>saveReply(r), text:"Сохранить ответ", ...(readOnly ? { "aria-disabled":"true" } : {}) }) ])
+  ]));
+
+  if (Array.isArray(r.history) && r.history.length){
+    const h = el("div", { class:"hist" });
+    r.history.slice(-4).forEach(x => h.appendChild(el("div", {}, [ el("b", { text: fmt(x.at) + "  " }), document.createTextNode(x.text || "") ])));
+    c.appendChild(h);
+  }
+  return c;
+}
+async function copyPlain(t){
+  try { await navigator.clipboard.writeText(t); toast("Номер скопирован"); } catch(e){ toast("Выделите номер вручную"); }
+}
+
+function render(){
+  const counts = { todo:0, wait:0, done:0, all:rows.length };
+  rows.forEach(r => { for (const g of ["todo","wait","done"]) if (GROUP[g].includes(r.status || "new")) counts[g]++; });
+  for (const g in counts) document.getElementById("c-" + g).textContent = counts[g];
+  const list = document.getElementById("list");
+  const act = document.activeElement && document.activeElement.id;
+  list.replaceChildren();
+  const shown = rows.filter(r => !GROUP[filter] || GROUP[filter].includes(r.status || "new"));
+  if (!shown.length) list.appendChild(el("div", { class:"empty", text: rows.length ? "Здесь пусто. Загляните в другие вкладки." : "Лидов пока нет." }));
+  shown.forEach(r => list.appendChild(card(r)));
+  if (act) { const n = document.getElementById(act); if (n) n.focus(); }
+}
+
+document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => {
+  filter = b.dataset.f;
+  document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  try { localStorage.setItem("outbox-filter", filter); } catch(e){}
+  render();
+}));
+try { const f = localStorage.getItem("outbox-filter"); if (f && GROUP.hasOwnProperty(f)) document.querySelector('.tab[data-f="'+f+'"]').click(); } catch(e){}
+
+(async () => {
+  db = window.claude ? await window.claude.use("db") : null;
+  const banner = document.getElementById("banner");
+  if (!db){
+    banner.hidden = false; banner.textContent = "База лидов недоступна в этом просмотре. Откройте страницу на claude.ai, войдя в свой аккаунт.";
+    document.getElementById("list").replaceChildren();
+    return;
+  }
+  try {
+    const u = await window.claude.use("user");
+    const can = u ? await u.can("data.write") : null;
+    if (can === false){ readOnly = true; banner.hidden = false; banner.textContent = "Только просмотр: менять статусы может владелец страницы."; }
+  } catch(e){}
+  db.collection("outbox").orderBy("order").onSnapshot(snap => {
+    rows = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    render();
+  }, err => {
+    banner.hidden = false; banner.textContent = "Связь с базой потеряна. Обновите страницу.";
+  });
+})();
+</script>

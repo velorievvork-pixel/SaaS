@@ -249,3 +249,36 @@ class TestContactFinder:
         from contact_finder import candidates
         c = candidates("Иванов Иван Иванович", "x.ru")
         assert len(c) == len(set(c))
+
+
+class TestContactedRegistry:
+    """L9: повторное первое касание. 23.09 агент принёс ЗЕНИТ-НОВА как новый лид."""
+
+    REG = (("зенит-нова", {"zenitnova.by"}, "2026-09-22", "email"),
+           ("завод промышленных сит пмк", {"1pmk.kz"}, "2026-09-24", "whatsapp"))
+
+    def test_same_domain_rejected(self, good_lead):
+        from lead_gate import check
+        good_lead["domain"] = "www.zenitnova.by"
+        assert any(x.startswith("L9") for x in check(good_lead, self.REG))
+
+    def test_same_company_other_org_form_rejected(self, good_lead):
+        from lead_gate import check
+        good_lead["domain"] = "other.kz"
+        good_lead["company"] = "ТОО «Завод Промышленных Сит ПМК» (бренд «Первая Метизная Компания»)"
+        assert any(x.startswith("L9") for x in check(good_lead, self.REG))
+
+    def test_new_company_passes(self, good_lead):
+        from lead_gate import check
+        assert not any(x.startswith("L9") for x in check(good_lead, self.REG))
+
+    def test_sent_card_is_not_its_own_duplicate(self, good_lead):
+        from lead_gate import check
+        good_lead["domain"] = "zenitnova.by"
+        good_lead["sent_on"] = "2026-09-22"
+        assert not any(x.startswith("L9") for x in check(good_lead, self.REG))
+
+    def test_multi_domain_field_split(self):
+        from lead_gate import norm_domain
+        assert norm_domain("ironplast.group / ironplast.kz") == {"ironplast.group", "ironplast.kz"}
+        assert norm_domain("https://www.svarka.kz/") == {"svarka.kz"}

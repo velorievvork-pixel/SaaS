@@ -15,6 +15,8 @@
   L5  цитата сигнала дословная, со ссылкой    (цитаты пересказывались)
   L6  ICP по численности и выручке
   L7  назван конкретный процесс под автоматизацию
+  L9  компании ещё не писали — сверка с реестром camirix/contacted.csv
+      (23.09 агент принёс ЗЕНИТ-НОВА как «новый» лид, хотя ей писали в пачке №1)
   L8  явно подтверждено, что вакансия и реестровая карточка — одна компания
       (23.09: дважды чуть не взял тёзку — книгоиздательскую «Группу Традиция»
       вместо промышленного холдинга, и «Food City» вместо «Food City Group».
@@ -24,9 +26,12 @@ FAIL CLOSED: поля нет — это FAIL. Пустая строка не с�
 
     python3 lead_gate.py lead.yaml
     python3 lead_gate.py leads/*.yaml --brief
+    python3 lead_gate.py leads/*.yaml --recheck   # чью вакансию пора перепроверить
 """
 import argparse
+import csv
 import datetime as dt
+import re
 import sys
 from pathlib import Path
 
@@ -43,6 +48,10 @@ ICP_HEAD = (20, 150)  # нижняя граница снижена с 30 до 20
 ICP_REV_MLN = (100, 3000)
 VACANCY_MAX_AGE_DAYS = 7
 RU_DEFAULT_COUNTRY = "RU"
+RECHECK_AFTER_DAYS = 5  # перепроверять за 2 дня до того, как L1 начнёт отсекать
+CONTACTED = Path(__file__).resolve().parent / "contacted.csv"
+ORG_FORMS = {"ооо", "тоо", "оао", "зао", "ао", "пао", "осоо", "сп", "ип", "чп", "уп",
+             "llc", "ltd", "too", "jsc", "company"}
 
 DECIDER_OK = ("собственник", "учредител", "генеральн", "гендиректор", "director",
               "основател", "владелец", "founder", "ceo")
@@ -54,8 +63,51 @@ def has(v):
     return v is not None and str(v).strip() not in ("", "None", "null", "~", "не найдено")
 
 
-def check(lead):
+def norm_domain(v):
+    """Домены из поля карточки: «a.group / a.kz» → {"a.group", "a.kz"}."""
+    out = set()
+    for raw in re.split(r"[\s/,;]+", str(v or "").lower()):
+        d = re.sub(r"^(https?:)?/*(www\.)?", "", raw).strip(".")
+        if "." in d and not d.startswith("#"):
+            out.add(d)
+    return out
+
+
+def norm_company(v):
+    """«ТОО «Завод ПМК» (бренд …)» → «завод пмк»: без кавычек, орг. формы и скобок."""
+    s = str(v or "").lower().split("(")[0]
+    s = re.sub(r"[«»\"'`.,]", " ", s)
+    words = [w for w in re.split(r"[^\wё-]+", s) if w and w not in ORG_FORMS]
+    return " ".join(words)
+
+
+def load_contacted(path=CONTACTED):
+    """Реестр законтаченных: [(norm_company, {domains}, date, channel)]. Нет файла — пустой."""
+    rows = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for r in csv.DictReader(fh):
+                rows.append((norm_company(r.get("company")), norm_domain(r.get("domain")),
+                             r.get("date", ""), r.get("channel", "")))
+    except FileNotFoundError:
+        pass
+    return rows
+
+
+def check(lead, contacted=None):
     p = []
+
+    # L9 — этой компании ещё не писали. Карточка с sent_on — это и есть запись
+    # о касании, её не сверяем с самой собой.
+    if not has(lead.get("sent_on")):
+        reg = load_contacted() if contacted is None else contacted
+        doms = norm_domain(lead.get("domain"))
+        name = norm_company(lead.get("company"))
+        for r_name, r_doms, r_date, r_ch in reg:
+            if (doms & r_doms) or (name and name == r_name):
+                p.append(f"L9 этой компании уже писали ({r_date}, {r_ch}), "
+                         "см. camirix/contacted.csv. Повторное первое касание читается как спам")
+                break
 
     # L1 — вакансия активна и проверена недавно
     v = lead.get("vacancy") or {}
@@ -169,7 +221,32 @@ def main():
     ap = argparse.ArgumentParser(description="Проверка карточки лида перед рассылкой")
     ap.add_argument("files", nargs="+")
     ap.add_argument("--brief", action="store_true", help="только вердикт по каждому файлу")
+    ap.add_argument("--recheck", action="store_true",
+                    help=f"список неотправленных лидов, чью вакансию пора перепроверить "
+                         f"(проверка старше {RECHECK_AFTER_DAYS} дн.)")
     a = ap.parse_args()
+
+    if a.recheck:
+        due = 0
+        for fp in a.files:
+            try:
+                lead = yaml.safe_load(Path(fp).read_text(encoding="utf-8")) or {}
+            except Exception:
+                continue
+            if has(lead.get("sent_on")) or not lead.get("company"):
+                continue
+            v = lead.get("vacancy") or {}
+            try:
+                age = (dt.date.today() - dt.date.fromisoformat(str(v.get("checked_on")))).days
+            except ValueError:
+                age = None
+            if age is None or age >= RECHECK_AFTER_DAYS:
+                due += 1
+                when = "никогда" if age is None else f"{age} дн. назад"
+                print(f"↻ {lead.get('company')} — вакансия проверена {when}: "
+                      f"{v.get('url', 'нет ссылки')}")
+        print(f"\nПерепроверить: {due}")
+        return 0
 
     bad = 0
     for fp in a.files:
