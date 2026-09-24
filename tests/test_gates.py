@@ -296,3 +296,45 @@ class TestIndependentVerification:
     def test_verified_card_passes(self, good_lead):
         from lead_gate import check
         assert not any(x.startswith("L10") for x in check(good_lead, ()))
+
+
+class TestStaffFinder:
+    """staff_finder.py на реальных случаях 24.09."""
+
+    def test_ceo_on_other_mail_domain(self):
+        from staff_finder import extract
+        t = ("Руководители\nГенеральный директор ООО \"Костромской завод полимерной упаковки\"\n"
+             "Акинфова Виктория Артуровна\nТелефон +7 (4942) 45-48-11\nE-mail\n"
+             "[v.akinfova@mptech.pro](mailto:v.akinfova@mptech.pro)\nНаписать сообщение")
+        r = extract(t, "kzpu.pro")[0]
+        assert r["email"] == "v.akinfova@mptech.pro"
+        assert r["level"] == "top" and r["name"] == "Акинфова Виктория Артуровна"
+        assert r["foreign_domain"] and not r["generic"]
+
+    def test_mailto_hidden_behind_generic_text(self):
+        from staff_finder import extract, to_text
+        page = '<p>ОФИС: Челябинск</p><a href="mailto:pinaev.d@tst-ur.ru">74@tst-ur.ru</a>'
+        text, mailtos = to_text(page)
+        got = {r["email"]: r for r in extract(text, "tst-ur.ru", mailtos)}
+        assert "pinaev.d@tst-ur.ru" in got and not got["pinaev.d@tst-ur.ru"]["generic"]
+        assert got["74@tst-ur.ru"]["generic"]
+
+    def test_demo_template_dropped_and_generic_flagged(self):
+        from staff_finder import extract
+        t = "Иванов Иван\nМенеджер\nivanov@site.ru\nОтдел продаж info@firma.ru"
+        got = {r["email"]: r for r in extract(t, "firma.ru")}
+        assert "ivanov@site.ru" not in got
+        assert got["info@firma.ru"]["generic"]
+
+    def test_commercial_director_is_not_first_person(self):
+        from staff_finder import extract
+        t = "Коммерческий директор\nПетров Пётр\nE-mail petrov@firma.ru"
+        assert extract(t, "firma.ru")[0]["level"] == "mid"
+
+    def test_role_does_not_leak_from_previous_card(self):
+        from staff_finder import extract
+        t = ("Генеральный директор\nСидоров Семён\nsidorov@firma.ru\n"
+             "Менеджер\nКозлова Анна\nkozlova@firma.ru")
+        got = {r["email"]: r for r in extract(t, "firma.ru")}
+        assert got["sidorov@firma.ru"]["level"] == "top"
+        assert got["kozlova@firma.ru"]["level"] == "staff"
