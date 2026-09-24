@@ -5,6 +5,8 @@
 company: ТОО «AZMT» (ранее ТОО «ЮГ-2009»)
 inn: "090340002508"    # БИН
 domain: azmt.kz
+verified_on: "2026-09-24"
+verified_what: "вакансия 137646482 активна; «Мухамеджанов Жалгас, Директор по продажам» → wa.me/77710720628 на azmt.kz/contact"
 country: KZ
 about: >
   Производство и продажа трубной продукции (гидромолоты, металлопрокат), топ-3
@@ -14,7 +16,7 @@ about: >
 vacancy:
   url: "https://hh.kz/vacancy/137646482"
   status: active
-  checked_on: "2026-09-23"
+  checked_on: "2026-09-24"
   title: Директор по продажам филиала в г. Алматы
   salary: не указана
 

@@ -5,6 +5,8 @@
 company: ТОО «УралМеталлинвест» (группа компаний «Металлинвест Казахстан»)
 inn: "031140003104"    # БИН
 domain: metall-invest.kz
+verified_on: "2026-09-24"
+verified_what: "вакансия 137619218 активна; +7 701 091 18 79 WhatsApp отдела продаж на metall-invest.kz/city/oral/; там же dir_uralsk@metall-invest.kz — ящик регионального директора"
 country: KZ
 about: >
   Торгово-производственная компания в сфере металлопроката и трубной продукции.
@@ -15,7 +17,7 @@ about: >
 vacancy:
   url: "https://uralsk.hh.kz/vacancy/137619218"
   status: active
-  checked_on: "2026-09-23"
+  checked_on: "2026-09-24"
   title: Заместитель регионального директора
   salary: "800 000 – 1 500 000 ₸"
 

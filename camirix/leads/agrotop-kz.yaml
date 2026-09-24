@@ -6,6 +6,8 @@
 company: ТОО «Агротоп»
 inn: "180340007934"    # БИН
 domain: agrotop.kz
+verified_on: "2026-09-24"
+verified_what: "вакансия 137380795 активна (ищут исполнительного директора, ЛПР может смениться); +7 700 760 00 02 и WhatsApp на agrotop.kz/contact-us, реквизиты ТОО «Агротоп» там же"
 country: KZ
 about: >
   Дистрибьютор семян, удобрений и средств защиты растений, производитель
@@ -17,7 +19,7 @@ about: >
 vacancy:
   url: "https://hh.kz/vacancy/137380795"
   status: active
-  checked_on: "2026-09-23"
+  checked_on: "2026-09-24"
   title: Исполнительный директор (CEO)
   salary: "от 1 500 000 ₸"
 
