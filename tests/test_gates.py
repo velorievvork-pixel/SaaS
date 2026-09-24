@@ -10,6 +10,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 import yaml
@@ -383,3 +384,93 @@ class TestDuplicateKeys:
     def test_unique_keys_load(self):
         from lead_gate import load_lead
         assert load_lead('company: X\nverified_on: "2026-09-24"\n')["company"] == "X"
+
+
+class TestWaInbox:
+    """wa_inbox.py: ответы из Green-API и авто-«Молчат». Данные — как на странице 24.09."""
+
+    ROWS: ClassVar[list] = [
+        {"id": "welding-company-kz", "company": "WELDING", "phone": "+7 702 243 26 27",
+         "status": "sent", "reply": "", "version": 2,
+         "history": [{"at": "2026-09-24T11:05:00Z", "text": "Отправил"}]},
+        {"id": "amk-metiz-kz", "company": "АМК-Метиз", "phone": "+7 701 762 06 39",
+         "status": "replied", "reply": "Ваш контакт передан IT отделу.", "version": 3,
+         "history": [{"at": "2026-09-24T08:30:00Z", "text": "Отправил"}]},
+        {"id": "office-expert-kz", "company": "Office-Expert", "phone": "",
+         "status": "no_whatsapp", "reply": "", "version": 2, "history": []},
+    ]
+
+    def test_silent_after_three_workdays_not_calendar_days(self):
+        import wa_inbox
+        at = dt.datetime.fromisoformat
+        # Отправлено в чт 24.09: пн 28.09 — только 2 рабочих дня (пт, пн).
+        silent, waiting = wa_inbox.silence_check(self.ROWS, at("2026-09-28T12:00:00+00:00"))
+        assert not silent and [w["id"] for w in waiting] == ["welding-company-kz"]
+        silent, _ = wa_inbox.silence_check(self.ROWS, at("2026-09-29T12:00:00+00:00"))
+        assert [s["id"] for s in silent] == ["welding-company-kz"]
+        assert silent[0]["version"] == 2  # для if_version при записи
+
+    def test_matches_reply_by_phone_ignores_groups_and_strangers(self):
+        import wa_inbox
+        msgs = [
+            {"chatId": "77022432627@c.us", "timestamp": 1790400000, "typeMessage": "textMessage",
+             "textMessage": "Директор в отпуске до понедельника", "idMessage": "A1"},
+            {"chatId": "120363153000000000@g.us", "timestamp": 1790400001,
+             "typeMessage": "textMessage", "textMessage": "группа"},
+            {"chatId": "79990000000@c.us", "timestamp": 1790400002,
+             "typeMessage": "textMessage", "textMessage": "чужой"},
+            {"chatId": "77022432627@c.us", "timestamp": 1790400003,
+             "typeMessage": "audioMessage"},
+        ]
+        got = wa_inbox.match_replies(self.ROWS, msgs)
+        assert [g["id"] for g in got] == ["welding-company-kz"] * 2
+        assert got[0]["text"].startswith("Директор в отпуске")
+        assert got[1]["text"] == "[audioMessage]"  # голосовое — слушать самому
+        assert not got[0]["before_sent"]
+
+    def test_eight_prefix_normalized(self):
+        import wa_inbox
+        assert wa_inbox.digits("8 (701) 762-06-39") == wa_inbox.digits("+7 701 762 06 39")
+
+    def test_refuses_any_sending_method(self):
+        import wa_inbox
+        env = {"GREEN_API_ID": "1", "GREEN_API_TOKEN": "t"}
+        with pytest.raises(ValueError):
+            wa_inbox.api_call("sendMessage", env=env, opener=lambda *a, **k: None)
+
+    def test_poll_skips_journal_when_not_authorized(self):
+        import io
+
+        import wa_inbox
+        calls = []
+
+        def opener(req, timeout):
+            calls.append(req.full_url)
+            return io.BytesIO(b'{"stateInstance": "notAuthorized"}')
+
+        env = {"GREEN_API_ID": "7103", "GREEN_API_TOKEN": "secret"}
+        state, replies = wa_inbox.poll(self.ROWS, 60, env=env, opener=opener)
+        assert state == "notAuthorized" and replies == []
+        assert len(calls) == 1 and "/waInstance7103/getStateInstance/" in calls[0]
+
+    def test_http_error_does_not_leak_token(self):
+        import urllib.error
+
+        import wa_inbox
+
+        def opener(req, timeout):
+            raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, None)
+
+        env = {"GREEN_API_ID": "1", "GREEN_API_TOKEN": "supersecret"}
+        with pytest.raises(RuntimeError) as e:
+            wa_inbox.api_call("getStateInstance", env=env, opener=opener)
+        assert "supersecret" not in str(e.value)
+
+    def test_loads_artifactdata_dump(self, tmp_path):
+        import wa_inbox
+        d = tmp_path / "outbox"
+        d.mkdir()
+        (d / "welding-company-kz.json").write_text(json.dumps(
+            {"id": "welding-company-kz", "version": 2, "data": self.ROWS[0]}), encoding="utf-8")
+        rows = wa_inbox.load_outbox(tmp_path)
+        assert rows[0]["id"] == "welding-company-kz" and rows[0]["version"] == 2
