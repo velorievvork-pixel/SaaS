@@ -124,6 +124,7 @@ def good_lead():
     return yaml.safe_load("""
 company: ООО «Коник»
 inn: "7802361565"
+verified_on: "{today}"
 domain: konik.ru
 vacancy: {url: "https://hh.ru/vacancy/1", status: active, checked_on: "{today}",
           title: Менеджер, salary: от 90 000 ₽}
@@ -282,3 +283,16 @@ class TestContactedRegistry:
         from lead_gate import norm_domain
         assert norm_domain("ironplast.group / ironplast.kz") == {"ironplast.group", "ironplast.kz"}
         assert norm_domain("https://www.svarka.kz/") == {"svarka.kz"}
+
+
+class TestIndependentVerification:
+    """L10: 24.09 из шести карточек агентов сначала перепроверили только две."""
+
+    def test_unverified_card_rejected(self, good_lead):
+        from lead_gate import check
+        good_lead.pop("verified_on")
+        assert any(x.startswith("L10") for x in check(good_lead, ()))
+
+    def test_verified_card_passes(self, good_lead):
+        from lead_gate import check
+        assert not any(x.startswith("L10") for x in check(good_lead, ()))
