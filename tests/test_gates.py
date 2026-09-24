@@ -319,9 +319,19 @@ class TestStaffFinder:
         assert "pinaev.d@tst-ur.ru" in got and not got["pinaev.d@tst-ur.ru"]["generic"]
         assert got["74@tst-ur.ru"]["generic"]
 
+    def test_amk_layout_role_box_duplicates_and_kazakh_names(self):
+        from staff_finder import extract
+        t = ("Генеральный директор Спиридонова Мария general@amk.kz general@amk.kz НАПИСАТЬ "
+             "Системный администратор Волков Юрий ceo@amk.kz ceo@amk.kz НАПИСАТЬ "
+             "HR менеджер Даулетқызы Алия hr@amk.kz hr@amk.kz НАПИСАТЬ")
+        got = {r["email"]: r for r in extract(t, "amk.kz")}
+        assert got["general@amk.kz"]["level"] == "top" and not got["general@amk.kz"]["generic"]
+        assert got["ceo@amk.kz"]["name"] == "Волков Юрий" and got["ceo@amk.kz"]["level"] == "staff"
+        assert got["hr@amk.kz"]["name"] == "Даулетқызы Алия" and got["hr@amk.kz"]["level"] == "staff"
+
     def test_demo_template_dropped_and_generic_flagged(self):
         from staff_finder import extract
-        t = "Иванов Иван\nМенеджер\nivanov@site.ru\nОтдел продаж info@firma.ru"
+        t = "Иванов Иван\nМенеджер\nivanov@site.ru\nОтдел продаж\ninfo@firma.ru"
         got = {r["email"]: r for r in extract(t, "firma.ru")}
         assert "ivanov@site.ru" not in got
         assert got["info@firma.ru"]["generic"]

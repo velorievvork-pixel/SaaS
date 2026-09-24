@@ -49,7 +49,10 @@ ROLE_MID = ("коммерческий директор", "руководител
             "управляющ", "head of")
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 MAILTO = re.compile(r"href\s*=\s*[\"']\s*mailto:\s*([^\"'?]+)", re.IGNORECASE)
-FIO = re.compile(r"\b([А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?)\s+([А-ЯЁ][а-яё]+)(?:\s+([А-ЯЁ][а-яё]+))?\b")
+# Кириллица + казахские/узбекские буквы: «Даулетқызы Алия» иначе теряется.
+_UP, _LO = "А-ЯЁӘҒҚҢӨҰҮҺІЎ", "а-яёәғқңөұүһіў"
+_W = f"[{_UP}][{_LO}]+"
+FIO = re.compile(rf"(?<![{_LO}{_UP}])({_W}(?:-{_W})?)\s+({_W})(?:\s+({_W}))?(?![{_LO}{_UP}])")
 ASPRO = ("Надежные и позитивные помощники", "Наши руководители", "aspro", "Аспро")
 NOT_NAMES = {"Сообщение", "Позвонить", "Подробнее", "Генеральный", "Коммерческий",
              "Финансовый", "Руководитель", "Менеджер",
@@ -120,6 +123,9 @@ def extract(text, domain, mailtos=()):
     prev_end = 0
     for raw_email, pos, end in emails:
         email = raw_email.strip(".")
+        seg_start = prev_end
+        if end > 0:
+            prev_end = end  # граница следующей карточки сдвигается и на пропущенных адресах
         if email in seen:
             continue
         seen.add(email)
@@ -131,9 +137,9 @@ def extract(text, domain, mailtos=()):
         foreign = bool(domain) and dom != domain and not dom.endswith("." + domain)
         # Карточка сотрудника — отрезок от предыдущего адреса до этого: левее уже
         # чужая карточка. Порядок ФИО и должности внутри бывает любым.
-        before = text[max(prev_end, pos - 300):pos] if pos >= 0 else ""
-        if end > 0:
-            prev_end = end
+        before = text[max(seg_start, pos - 300):pos] if pos >= 0 else ""
+        # Адреса внутри отрезка (дубли ссылки) убираем: «ceo@» соседа — не должность.
+        before = EMAIL.sub(" ", before)
         name, _ = nearest_name(before) if before else ("", -1)
         level, role = classify_role(before)
         found.append({
@@ -141,7 +147,10 @@ def extract(text, domain, mailtos=()):
             "name": name,
             "role": role,
             "level": level,
-            "generic": is_generic(local),
+            # Ящик должности (general@, info@), подписанный на странице именем, —
+            # канал этого человека, а не общий ящик.
+            "generic": is_generic(local) and not name,
+            "role_box": is_generic(local),
             "foreign_domain": foreign,
         })
     order = {"top": 0, "mid": 1, "staff": 2}
@@ -198,7 +207,7 @@ def show(domain, rows, errors=(), aspro=False):
           + ("  [шаблон Аспро]" if aspro else ""))
     for r in rows:
         tag = {"top": "ЛПР?", "mid": "рук.", "staff": "    "}[r["level"]]
-        flag = " общий" if r["generic"] else ""
+        flag = " общий" if r["generic"] else (" ящик должности" if r.get("role_box") else "")
         flag += " чужой домен" if r["foreign_domain"] else ""
         print(f"  {tag} {r['email']:<34} {r['name'] or '—':<32} {r['role']}{flag}"
               + (f"\n        {r['url']}" if r.get("url") else ""))
