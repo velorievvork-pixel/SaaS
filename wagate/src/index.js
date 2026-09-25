@@ -43,6 +43,7 @@ async function webhook(g) {
 const wa = new WhatsApp({
   kv,
   pairPhone: cfg.pairPhone,
+  onLinked: () => store.markLinked(),
   logger,
   onIncoming: (g) => {
     if (store.addIncoming(g)) {

@@ -5,7 +5,7 @@
 // plus wagateLimits (our own: today's counters and rules).
 import crypto from 'node:crypto';
 import http from 'node:http';
-import { checkSend, digits, phoneFromChatId, toChatId } from './core.js';
+import { checkSend, dailyNewChatLimit, digits, phoneFromChatId, toChatId } from './core.js';
 
 const MAX_BODY = 64 * 1024;
 
@@ -147,7 +147,8 @@ export function createHandler({ cfg, wa, store, now = () => new Date(), log = ()
         const dayStart = new Date(now()); dayStart.setUTCHours(0, 0, 0, 0);
         const newToday = store.outgoing.filter((o) => o.newChat && o.timestamp >= dayStart.getTime() / 1000).length;
         return send(200, {
-          newChatsToday: newToday, dailyNewChats: cfg.dailyNewChats, minIntervalSec: cfg.minIntervalSec,
+          newChatsToday: newToday, dailyNewChats: dailyNewChatLimit(store, cfg, now()), dailyNewChatsMax: cfg.dailyNewChats,
+          linkedAt: store.linkedAt ? new Date(store.linkedAt).toISOString() : null, replies30d: store.replyStats(30, now().getTime()), minIntervalSec: cfg.minIntervalSec,
           enforceHours: cfg.enforceHours, workHours: cfg.workHours, workDays: cfg.workDays, stopList: store.stop.size, leads: store.contacted.size,
         });
       }

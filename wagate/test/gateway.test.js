@@ -31,14 +31,15 @@ describe('phones and time zones', () => {
     assert.equal(utcOffset('996555123456'), 6);
     assert.equal(utcOffset('12025550100'), null);
   });
-  test('no messages on public holidays of the recipient\'s country', () => {
-    const ordinaryMonday = new Date('2026-10-26T06:00:00Z');
-    const kzHoliday = new Date('2027-10-25T06:00:00Z');     // Monday, Republic Day in Kazakhstan
+  test('no messages on public holidays of the recipient\'s country (2026, with transfers)', () => {
     assert.deepEqual([country(KZ), country(RU), country('996555123456')], ['KZ', 'RU', 'KG']);
-    assert.equal(inWorkingHours(KZ, kzHoliday).reason, 'holiday');
-    assert.equal(inWorkingHours(RU, kzHoliday).ok, true);   // not a holiday in Russia
+    const mon26oct = new Date('2026-10-26T06:00:00Z');       // Republic Day moved from Sunday 25.10
+    assert.equal(inWorkingHours(KZ, mon26oct).reason, 'holiday');
+    assert.equal(inWorkingHours(RU, mon26oct).ok, true);      // not a holiday in Russia
     assert.equal(inWorkingHours(RU, new Date('2026-11-04T08:00:00Z')).reason, 'holiday');
-    assert.equal(inWorkingHours(KZ, ordinaryMonday).ok, true);
+    assert.equal(inWorkingHours(KZ, new Date('2026-08-31T06:00:00Z')).ok, true);   // 30.08 is not a day off in 2026
+    assert.equal(inWorkingHours('996555123456', new Date('2026-11-09T05:00:00Z')).ok, true);  // KG: no transfers
+    assert.equal(inWorkingHours('998901234567', new Date('2026-01-14T06:00:00Z')).ok, true);  // UZ: 14.01 works
   });
   test('working hours are the recipient\'s, not ours', () => {
     assert.equal(inWorkingHours(KZ, TUE_11_ASTANA).ok, true);
@@ -117,6 +118,32 @@ describe('sending rules', () => {
     out(KZ, t, { textMessage: 'Спасибо большое!' });
     out(RU, t, { textMessage: 'Спасибо большое!' });
     assert.equal(checkSend({ phone: KZ2, text: 'Спасибо большое!', store, cfg, now: TUE_11_ASTANA }).ok, true);
+  });
+  test('optional warm-up (WARMUP=true): 3 new chats a day, then 8, then the normal limit; off by default', () => {
+    assert.equal(loadConfig({ WAGATE_TOKEN: TOKEN }).warmup, false);
+    const cfg = cfgWith({ dailyNewChats: 15, warmup: true });
+    store.linkedAt = TUE_11_ASTANA.getTime() - 2 * 86400e3;
+    const t = TUE_11_ASTANA.getTime() / 1000 - 600;
+    for (const p of ['77010000001', '77010000002', '77010000003']) out(p, t);
+    assert.equal(checkSend({ phone: KZ2, text: 'a', store, cfg, now: TUE_11_ASTANA }).limit, 3);
+    store.linkedAt = TUE_11_ASTANA.getTime() - 10 * 86400e3;
+    assert.equal(checkSend({ phone: KZ2, text: 'a', store, cfg, now: TUE_11_ASTANA }).ok, true);
+    assert.equal(checkSend({ phone: KZ2, text: 'a', store, cfg: cfgWith({ warmup: false }), now: TUE_11_ASTANA }).ok, true);
+  });
+  test('new chats pause when almost nobody answers (20+ chats, under 10%)', () => {
+    const t = TUE_11_ASTANA.getTime() / 1000 - 10 * 86400;
+    for (let i = 0; i < 20; i++) out(`7701100${String(i).padStart(4, '0')}`, t);
+    const cfg = cfgWith({ dailyNewChats: 99 });
+    const v = checkSend({ phone: KZ2, text: 'a', store, cfg, now: TUE_11_ASTANA });
+    assert.deepEqual([v.reason, v.newChats, v.answered], ['low_reply_rate', 20, 0]);
+    // two answers out of twenty = 10%: allowed again
+    for (const i of [0, 1]) {
+      store.addIncoming({ idMessage: `a${i}`, timestamp: t + 60, typeMessage: 'textMessage',
+        chatId: `7701100${String(i).padStart(4, '0')}@c.us`, textMessage: 'да' });
+    }
+    assert.equal(checkSend({ phone: KZ2, text: 'a', store, cfg, now: TUE_11_ASTANA }).ok, true);
+    // replies to people who already wrote are never paused
+    assert.equal(checkSend({ phone: '77011000005', text: 'b', store, cfg, now: TUE_11_ASTANA }).ok, true);
   });
   test('stop list and off hours', () => {
     store.addStop(KZ);

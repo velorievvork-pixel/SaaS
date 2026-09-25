@@ -30,8 +30,16 @@ class FakeResp(io.BytesIO):
 
 
 class TestGuard(unittest.TestCase):
-    def test_real_first_message_passes(self):
-        self.assertEqual(wa_send.guard(FIRST, "first"), [])
+    def test_old_first_message_wastes_the_preview(self):
+        # Отправленный 25.09 текст: первые 80 символов — «Меня зовут…, я из компании…».
+        self.assertTrue(any(r.startswith("H7") for r in wa_send.guard(FIRST, "first")))
+
+    def test_first_message_that_starts_with_them_passes(self):
+        text = ("Добрый день! Вижу, что в Алматы вы ищете бухгалтера-оператора на реализации, ЭСФ "
+                "и разноску Kaspi Pay. Я Ярослав из Camirix, мы автоматизируем такие документы "
+                "поверх 1С, чтобы с ростом заказов не приходилось добавлять людей. Подскажите, "
+                "как лучше связаться со Светланой Александровной?")
+        self.assertEqual(wa_send.guard(text, "first"), [])
 
     def test_short_reply_passes_only_as_reply(self):
         text = "Понял, спасибо, что ответили. Если с заявками из регионов что-то изменится, пишите."

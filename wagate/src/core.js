@@ -26,17 +26,39 @@ const ZONES = [
   ['994', 4, 'AZ'], ['995', 4, 'GE'], ['373', 3, 'MD'],
 ];
 
-// Public holidays with fixed dates (MM-DD). People do not do business chats on these days, and a cold
-// message on Republic Day reads like a bot. Moving holidays (Kurban Ait, Oraza Ait) are not listed.
+// Non-working public holidays (weekdays only matter). Checked 25.09.2026 against official sources:
+// KZ gov.kz / egov.kz 2026, RU consultant.ru (ТК ст. 112 + постановление №1466), UZ указ УП-257 от
+// 24.12.2025 (afisha.uz, goldenpages.uz), KG новый Трудовой кодекс (Sputnik.kg 2026), BY mintrud.gov.by.
+// The year lists include transfers and moving religious days (Курбан/Орозо айт, Радуница).
+export const HOLIDAYS_BY_YEAR = {
+  2026: {
+    KZ: ['01-01', '01-02', '01-07', '03-09', '03-23', '03-24', '03-25', '05-01', '05-07', '05-11', '05-27', '07-06',
+      '10-26', '12-16'],
+    RU: ['01-01', '01-02', '01-05', '01-06', '01-07', '01-08', '01-09', '02-23', '03-09', '05-01', '05-11', '06-12',
+      '11-04', '12-31'],
+    UZ: ['01-01', '01-02', '03-09', '03-20', '03-23', '05-27', '05-28', '05-29', '08-31', '09-01', '10-01', '12-08'],
+    KG: ['01-01', '01-02', '01-05', '01-06', '01-07', '01-08', '01-09', '03-20', '05-01', '05-04', '05-05', '05-06',
+      '05-07', '05-08', '05-27', '08-31'],
+    BY: ['01-01', '01-02', '01-07', '04-20', '04-21', '05-01', '07-03', '12-25'],
+  },
+};
+// Other years: fixed dates only (no transfers, no moving religious days) — add the year above when known.
 export const HOLIDAYS = {
-  KZ: ['01-01', '01-02', '01-07', '03-08', '03-21', '03-22', '03-23', '05-01', '05-07', '05-09', '07-06', '08-30',
-    '10-25', '12-16'],
+  KZ: ['01-01', '01-02', '01-07', '03-08', '03-21', '03-22', '03-23', '05-01', '05-07', '05-09', '07-06', '10-25',
+    '12-16'],
   RU: ['01-01', '01-02', '01-03', '01-04', '01-05', '01-06', '01-07', '01-08', '02-23', '03-08', '05-01', '05-09',
     '06-12', '11-04'],
-  UZ: ['01-01', '01-14', '03-08', '03-21', '05-09', '09-01', '10-01', '12-08'],
-  KG: ['01-01', '01-07', '02-23', '03-08', '03-21', '05-01', '05-05', '05-09', '08-31', '11-07', '11-08'],
+  UZ: ['01-01', '03-08', '03-21', '05-09', '09-01', '10-01', '12-08'],
+  KG: ['01-01', '01-02', '01-03', '01-04', '01-05', '01-06', '01-07', '01-08', '01-09', '03-08', '03-21', '05-01',
+    '05-02', '05-03', '05-04', '05-05', '05-06', '05-07', '05-08', '05-09', '08-31'],
   BY: ['01-01', '01-02', '01-07', '03-08', '05-01', '05-09', '07-03', '11-07', '12-25'],
 };
+
+export function isHoliday(phone, localDate) {
+  const iso = localDate.toISOString();
+  const list = HOLIDAYS_BY_YEAR[iso.slice(0, 4)]?.[country(phone)] ?? HOLIDAYS[country(phone)] ?? [];
+  return list.includes(iso.slice(5, 10));
+}
 
 function zone(phone) {
   const d = digits(phone);
@@ -59,7 +81,7 @@ export function inWorkingHours(phone, now = new Date(), hours = '9-18', days = '
   const dow = local.getUTCDay() || 7;
   const hour = local.getUTCHours() + local.getUTCMinutes() / 60;
   if (dow < d0 || dow > d1) return { ok: false, reason: 'weekend', localTime: local.toISOString().slice(0, 16) };
-  if ((HOLIDAYS[country(phone)] || []).includes(local.toISOString().slice(5, 10))) {
+  if (isHoliday(phone, local)) {
     return { ok: false, reason: 'holiday', localTime: local.toISOString().slice(0, 16) };
   }
   if (hour < h0 || hour >= h1) return { ok: false, reason: 'off_hours', localTime: local.toISOString().slice(0, 16) };
@@ -138,15 +160,18 @@ const parseLines = (lines) => lines.flatMap((l) => { try { return [JSON.parse(l)
  * through to the KV store (files or Postgres, see storage.js). Create with `await Store.open(kv)`.
  */
 export class Store {
-  static async open(kv, { keepDays = 14, onError = () => {} } = {}) {
+  static async open(kv, { keepDays = 30, onError = () => {} } = {}) {
     const incoming = parseLines(await kv.readLog('incoming'));
     const outgoing = parseLines(await kv.readLog('outgoing'));
     const stop = JSON.parse((await kv.get('stoplist')) || '[]');
     const allowed = JSON.parse((await kv.get('allowlist')) || '[]');
-    return new Store(kv, { incoming, outgoing, stop, allowed, keepDays, onError });
+    const linkedAt = Number(await kv.get('linked_at')) || 0;
+    return new Store(kv, { incoming, outgoing, stop, allowed, linkedAt, keepDays, onError });
   }
 
-  constructor(kv, { incoming = [], outgoing = [], stop = [], allowed = [], keepDays = 14, onError = () => {} } = {}) {
+  constructor(kv, {
+    incoming = [], outgoing = [], stop = [], allowed = [], linkedAt = 0, keepDays = 30, onError = () => {},
+  } = {}) {
     this.kv = kv;
     this.onError = onError;
     const since = Date.now() / 1000 - keepDays * 86400;
@@ -154,6 +179,7 @@ export class Store {
     // that was messaged by hand (allow). Everyone else — the owner's personal chats — is invisible:
     // their messages are dropped on arrival, never stored, never returned by the API.
     this.allowed = new Set(allowed);
+    this.linkedAt = linkedAt;   // when this number was first linked: new numbers warm up slowly
     this.contacted = new Set([...outgoing.map((m) => phoneFromChatId(m.chatId)), ...this.allowed]);
     this.incoming = incoming.filter((m) => m.timestamp >= since);
     this.outgoing = outgoing.filter((m) => m.timestamp >= since);
@@ -238,6 +264,25 @@ export class Store {
     this.#write(() => this.kv.set('stoplist', list));
   }
 
+  /** Remembers the first successful link of the number (only once). */
+  markLinked(now = Date.now()) {
+    if (this.linkedAt) return;
+    this.linkedAt = now;
+    this.#write(() => this.kv.set('linked_at', String(now)));
+  }
+
+  /** New chats in the last `days` days and how many of them answered at all. */
+  replyStats(days = 30, now = Date.now()) {
+    const since = now / 1000 - days * 86400;
+    const firsts = new Map();
+    for (const m of this.outgoing) {
+      if (m.newChat && m.timestamp >= since && !firsts.has(m.chatId)) firsts.set(m.chatId, m.timestamp);
+    }
+    let answered = 0;
+    for (const [chatId, t] of firsts) if (this.incoming.some((m) => m.chatId === chatId && m.timestamp >= t)) answered++;
+    return { newChats: firsts.size, answered, rate: firsts.size ? answered / firsts.size : null };
+  }
+
   last(list, minutes, now = Date.now()) {
     const since = now / 1000 - minutes * 60;
     return this[list].filter((m) => m.timestamp >= since).sort((a, b) => b.timestamp - a.timestamp);
@@ -280,13 +325,33 @@ export function checkSend({ phone, text, store, cfg, now = new Date() }) {
   if (isNew) {
     const dayStart = new Date(now); dayStart.setUTCHours(0, 0, 0, 0);
     const newToday = store.outgoing.filter((m) => m.newChat && m.timestamp >= dayStart.getTime() / 1000).length;
-    if (newToday >= cfg.dailyNewChats) return { ok: false, status: 429, reason: 'daily_new_chat_limit', limit: cfg.dailyNewChats };
+    const limit = dailyNewChatLimit(store, cfg, now);
+    if (newToday >= limit) return { ok: false, status: 429, reason: 'daily_new_chat_limit', limit };
+    // WhatsApp counts messages left without an answer; a long run of them gets the number banned.
+    // Low reply rate also means the texts or the segment are off: stop and let a person look.
+    const st = store.replyStats(30, now.getTime());
+    if (cfg.minReplyRate > 0 && st.newChats >= 20 && st.rate < cfg.minReplyRate) {
+      return { ok: false, status: 429, reason: 'low_reply_rate', ...st };
+    }
     const lastNew = store.outgoing.filter((m) => m.newChat).at(-1);
     if (lastNew && nowS - lastNew.timestamp < cfg.minIntervalSec) {
       return { ok: false, status: 429, reason: 'too_soon', retryAfterSec: Math.ceil(cfg.minIntervalSec - (nowS - lastNew.timestamp)) };
     }
   }
   return { ok: true, newChat: isNew };
+}
+
+/**
+ * Optional slow start for a freshly linked number (WARMUP=true): 3 new chats a day the first week, 8 the
+ * second. This is practice of WhatsApp API vendors, not an official WhatsApp figure, so it is off by default.
+ * What is confirmed (TechCrunch, 17.10.2025): WhatsApp tests a monthly cap on messages to non-contacts who
+ * do not reply — hence the low-reply-rate pause below, which is on by default.
+ */
+export function dailyNewChatLimit(store, cfg, now = new Date()) {
+  if (!cfg.warmup || !store.linkedAt) return cfg.dailyNewChats;
+  const days = (now.getTime() - store.linkedAt) / 86400e3;
+  const ramp = days < 7 ? 3 : days < 14 ? 8 : Infinity;
+  return Math.min(cfg.dailyNewChats, ramp);
 }
 
 export function loadConfig(env = process.env) {
@@ -309,6 +374,8 @@ export function loadConfig(env = process.env) {
     workDays: env.WORK_DAYS || '1-5',
     maxLength: num('MAX_LENGTH', 2000),
     sameTextLimit: num('SAME_TEXT_LIMIT', 2),
+    warmup: env.WARMUP === 'true',
+    minReplyRate: num('MIN_REPLY_RATE', 0.1),
   };
   if (cfg.token.length < 16) throw new Error('WAGATE_TOKEN не задан или короче 16 символов (см. .env.example)');
   return cfg;

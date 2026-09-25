@@ -11,7 +11,8 @@ export class WhatsApp {
   /**
    * onIncoming(greenMessage) is called for each new personal message from another person.
    */
-  constructor({ kv, logger, onIncoming, pairPhone = '' }) {
+  constructor({ kv, logger, onIncoming, onLinked = () => {}, pairPhone = '' }) {
+    this.onLinked = onLinked;
     this.kv = kv;
     this.logger = logger;
     this.onIncoming = onIncoming;
@@ -55,6 +56,7 @@ export class WhatsApp {
       if (u.connection === 'open') {
         this._state = 'authorized';
         this._qr = null;
+        this.onLinked();
         this.retries = 0;
         this.logger.info('WhatsApp подключён');
       }
