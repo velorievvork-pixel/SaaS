@@ -74,6 +74,9 @@ h1{font-size:24px;font-weight:600;margin:0;text-wrap:balance}
 .reply label{font-size:12px;color:var(--ink-2);letter-spacing:.02em}
 textarea{font:inherit;font-size:14px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px;min-height:62px;resize:vertical;width:100%}
 .note{font-size:13px;color:var(--ink-2)}
+.when{font-size:13px;padding:6px 10px;border-radius:8px;align-self:flex-start}
+.when.ok{background:var(--wa-bg);color:var(--wa)}
+.when.late{background:var(--warn-bg);color:var(--warn)}
 .note a{color:var(--accent)}
 .hist{font-size:12.5px;color:var(--ink-2);border-top:1px dashed var(--line);padding-top:8px;display:flex;flex-direction:column;gap:4px}
 .hist b{font-family:var(--mono);font-weight:500}
@@ -157,6 +160,24 @@ async function saveReply(r){
   catch(e){ toast("Не сохранилось, попробуйте ещё раз"); }
 }
 
+// Часовой пояс адресата по стране (часы от UTC). Казахстан с 01.03.2024 — единый UTC+5.
+// Для России по умолчанию Москва; точный пояс можно задать полем tz_offset.
+const TZ = { KZ:5, UZ:5, KG:6, TJ:5, BY:3, RU:3, AM:4, AZ:4, GE:4 };
+const WORK = { from:9, to:18 };  // рабочие часы адресата, пн–пт
+function localWhen(r){
+  const off = Number.isFinite(r.tz_offset) ? r.tz_offset : TZ[r.country];
+  if (off === undefined) return null;
+  const now = new Date(Date.now() + off * 3600e3);
+  const h = now.getUTCHours(), m = now.getUTCMinutes(), wd = now.getUTCDay();
+  const hhmm = String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0");
+  const weekend = wd === 0 || wd === 6;
+  if (!weekend && h >= WORK.from && h < WORK.to) return { ok:true, text:"У них сейчас " + hhmm + ", рабочее время: можно отправлять" };
+  let days = 0, d = wd, beforeStart = !weekend && h < WORK.from;
+  if (!beforeStart){ do { d = (d + 1) % 7; days++; } while (d === 0 || d === 6); }
+  const dayWord = days === 0 ? "сегодня" : days === 1 ? "завтра" : "в понедельник";
+  return { ok:false, text:"У них сейчас " + hhmm + (weekend ? ", выходной" : ", нерабочее время") + ". Лучше отправить " + dayWord + " после 10:00 по их времени" };
+}
+
 function card(r){
   const link = waLink(r.phone, r.message);
   const c = el("article", { class:"card" });
@@ -169,6 +190,10 @@ function card(r){
     el("code", { text:r.phone }),
     el("button", { class:"btn small", type:"button", onclick:(e)=>{ copyPlain(r.phone); } , text:"Копировать номер" })
   ]));
+  if ((r.status || "new") === "new"){
+    const w = localWhen(r);
+    if (w) c.appendChild(el("div", { class:"when " + (w.ok ? "ok" : "late"), text:w.text }));
+  }
   if (r.message){
     c.appendChild(el("div", { class:"msg", text:r.message }));
     const acts = el("div", { class:"actions" });
@@ -218,6 +243,8 @@ function render(){
   shown.forEach(r => list.appendChild(card(r)));
   if (act) { const n = document.getElementById(act); if (n) n.focus(); }
 }
+// Подсказка о местном времени устаревает: раз в минуту перерисовываем, если никто не печатает.
+setInterval(() => { const a = document.activeElement; if (!a || a.tagName !== "TEXTAREA") render(); }, 60000);
 
 document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => {
   filter = b.dataset.f;
