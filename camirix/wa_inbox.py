@@ -33,6 +33,9 @@ from pathlib import Path
 
 SILENT_AFTER_WORKDAYS = 3
 READ_ONLY = {"getStateInstance", "lastIncomingMessages"}
+# Не WhatsApp, а настройка нашего шлюза wagate: какие чаты считать лидами. Остальные (личные)
+# шлюз не читает. Метод только сужает то, что шлюз показывает, ничего не отправляет.
+LEADS_METHOD = "wagateAllow"
 DEFAULT_API = "https://api.green-api.com"
 TEXT_TYPES = {"textMessage", "extendedTextMessage", "quotedMessage"}
 
@@ -106,8 +109,8 @@ def silence_check(rows, now=None):
 
 # --- Green-API ---------------------------------------------------------------
 
-def api_call(method, query="", env=None, opener=urllib.request.urlopen):
-    if method not in READ_ONLY:
+def api_call(method, query="", env=None, opener=urllib.request.urlopen, body=None):
+    if method not in READ_ONLY and method != LEADS_METHOD:
         raise ValueError(f"{method}: скрипт только читает WhatsApp")
     env = env if env is not None else os.environ
     base = (env.get("GREEN_API_URL") or DEFAULT_API).rstrip("/")
@@ -115,7 +118,10 @@ def api_call(method, query="", env=None, opener=urllib.request.urlopen):
     if not iid or not token:
         raise LookupError("нет секретов GREEN_API_ID / GREEN_API_TOKEN")
     url = f"{base}/waInstance{iid}/{method}/{token}" + (f"?{query}" if query else "")
-    req = urllib.request.Request(url, headers={"User-Agent": "camirix-wa-inbox"})
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method="POST" if data else "GET",
+                                 headers={"User-Agent": "camirix-wa-inbox",
+                                          "Content-Type": "application/json"})
     try:
         with opener(req, timeout=20) as r:
             return json.loads(r.read().decode("utf-8") or "null")
@@ -157,10 +163,30 @@ def match_replies(rows, messages):
     return out
 
 
+def sent_phones(rows):
+    """Номера, которым сообщение уже ушло (руками со страницы или через шлюз)."""
+    return sorted({digits(r.get("phone")) for r in rows if sent_at(r) and digits(r.get("phone"))})
+
+
+def register_leads(rows, env=None, opener=urllib.request.urlopen):
+    """Сообщает шлюзу номера лидов, чтобы он читал их ответы. Только отправленным: иначе
+    новый лид считался бы знакомым и обходил дневной лимит новых чатов.
+    У Green-API такого метода нет, тогда пропуск."""
+    phones = sent_phones(rows)
+    if not phones:
+        return 0
+    try:
+        reply = api_call(LEADS_METHOD, env=env, opener=opener, body={"phones": phones})
+        return (reply or {}).get("added", 0)
+    except RuntimeError:
+        return 0
+
+
 def poll(rows, minutes, env=None, opener=urllib.request.urlopen):
     state = (api_call("getStateInstance", env=env, opener=opener) or {}).get("stateInstance")
     if state != "authorized":
         return state, []
+    register_leads(rows, env=env, opener=opener)
     msgs = api_call("lastIncomingMessages", f"minutes={int(minutes)}", env=env, opener=opener)
     return state, match_replies(rows, msgs)
 

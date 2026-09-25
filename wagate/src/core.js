@@ -112,6 +112,8 @@ export const textOf = (g) => g?.textMessage ?? g?.extendedTextMessage?.text ?? g
 
 // ---------- storage ----------
 
+export const HOLD_HOURS = 48;
+
 const parseLines = (lines) => lines.flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
 
 /**
@@ -123,19 +125,27 @@ export class Store {
     const incoming = parseLines(await kv.readLog('incoming'));
     const outgoing = parseLines(await kv.readLog('outgoing'));
     const stop = JSON.parse((await kv.get('stoplist')) || '[]');
-    return new Store(kv, { incoming, outgoing, stop, keepDays, onError });
+    const allowed = JSON.parse((await kv.get('allowlist')) || '[]');
+    return new Store(kv, { incoming, outgoing, stop, allowed, keepDays, onError });
   }
 
-  constructor(kv, { incoming = [], outgoing = [], stop = [], keepDays = 14, onError = () => {} } = {}) {
+  constructor(kv, { incoming = [], outgoing = [], stop = [], allowed = [], keepDays = 14, onError = () => {} } = {}) {
     this.kv = kv;
     this.onError = onError;
     const since = Date.now() / 1000 - keepDays * 86400;
-    // Everyone we ever talked to, not only the last two weeks: a reply to an old chat is not a new chat.
-    this.contacted = new Set([...outgoing, ...incoming].map((m) => phoneFromChatId(m.chatId)));
+    // Leads only. A number gets here when the gateway writes to it, or when the agent registers a lead
+    // that was messaged by hand (allow). Everyone else — the owner's personal chats — is invisible:
+    // their messages are dropped on arrival, never stored, never returned by the API.
+    this.allowed = new Set(allowed);
+    this.contacted = new Set([...outgoing.map((m) => phoneFromChatId(m.chatId)), ...this.allowed]);
     this.incoming = incoming.filter((m) => m.timestamp >= since);
     this.outgoing = outgoing.filter((m) => m.timestamp >= since);
     this.seen = new Set(this.incoming.map((m) => m.idMessage));
     this.stop = new Set(stop);
+    // Messages from numbers that are not leads (yet). Kept only in memory, never written or returned,
+    // for up to HOLD_HOURS: a lead messaged by hand from the page is registered at the next poll, and its
+    // early reply must not be lost. Anything still unclaimed after that is forgotten.
+    this.held = new Map();
     this.queue = [];      // notifications for receiveNotification / deleteNotification
     this.nextReceipt = 1;
     this.pending = Promise.resolve();
@@ -149,12 +159,50 @@ export class Store {
   /** Resolves when everything written so far has reached the store. */
   flush() { return this.pending; }
 
-  addIncoming(g) {
+  /** Is this a lead's chat (and not a personal one)? */
+  isLead(phone) { return this.contacted.has(digits(phone)); }
+
+  /** Registers leads the owner messaged by hand, so their replies become visible to the agent. */
+  allow(phones, now = Date.now()) {
+    const added = [...new Set(phones.map(digits))].filter((p) => p.length >= 10 && p.length <= 15 && !this.allowed.has(p));
+    for (const p of added) { this.allowed.add(p); this.contacted.add(p); }
+    if (added.length) {
+      const list = JSON.stringify([...this.allowed]);
+      this.#write(() => this.kv.set('allowlist', list));
+    }
+    this.#release(now);
+    return added.length;
+  }
+
+  #hold(g, now) {
+    const phone = phoneFromChatId(g.chatId);
+    const list = this.held.get(phone) || [];
+    if (list.length < 50 && !list.some((m) => m.idMessage === g.idMessage)) list.push({ g, at: now });
+    this.held.set(phone, list);
+    if (this.held.size > 5000) this.held.delete(this.held.keys().next().value);   // bounded memory
+  }
+
+  /** Moves held messages of numbers that became leads into the store; forgets expired ones. */
+  #release(now = Date.now()) {
+    for (const [phone, list] of this.held) {
+      const fresh = list.filter((x) => now - x.at < HOLD_HOURS * 3600e3);
+      if (this.isLead(phone)) {
+        this.held.delete(phone);
+        for (const x of fresh) this.addIncoming(x.g, now);
+      } else if (fresh.length) this.held.set(phone, fresh);
+      else this.held.delete(phone);
+    }
+  }
+
+  addIncoming(g, now = Date.now()) {
+    if (!this.isLead(phoneFromChatId(g.chatId))) {   // not a lead: nothing stored, nothing shown
+      this.#hold(g, now);
+      return false;
+    }
     if (this.seen.has(g.idMessage)) return false;   // WhatsApp resends on reconnect
     this.seen.add(g.idMessage);
     this.incoming.push(g);
     this.#write(() => this.kv.append('incoming', JSON.stringify(g)));
-    this.contacted.add(phoneFromChatId(g.chatId));
     if (isOptOut(textOf(g))) this.addStop(phoneFromChatId(g.chatId));
     this.queue.push({ receiptId: this.nextReceipt++, body: { typeWebhook: 'incomingMessageReceived', ...g } });
     return true;
@@ -164,6 +212,7 @@ export class Store {
     this.outgoing.push(g);
     this.#write(() => this.kv.append('outgoing', JSON.stringify(g)));
     this.contacted.add(phoneFromChatId(g.chatId));
+    this.#release();
   }
 
   addStop(phone) {

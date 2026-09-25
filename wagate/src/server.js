@@ -134,12 +134,21 @@ export function createHandler({ cfg, wa, store, now = () => new Date(), log = ()
         return send(200, { result: i >= 0 });
       }
 
+      case 'wagateAllow': {
+        // Our own method: numbers of leads the owner already messaged by hand. Only these (and numbers
+        // the gateway wrote to) are read; everything else is treated as the owner's private chats.
+        if (req.method !== 'POST') return send(405, { error: 'POST' });
+        const body = await readBody(req);
+        if (!Array.isArray(body.phones) || body.phones.length > 1000) return send(400, { error: 'phones: array' });
+        return send(200, { added: store.allow(body.phones.map(String)), leads: store.contacted.size });
+      }
+
       case 'wagateLimits': {
         const dayStart = new Date(now()); dayStart.setUTCHours(0, 0, 0, 0);
         const newToday = store.outgoing.filter((o) => o.newChat && o.timestamp >= dayStart.getTime() / 1000).length;
         return send(200, {
           newChatsToday: newToday, dailyNewChats: cfg.dailyNewChats, minIntervalSec: cfg.minIntervalSec,
-          enforceHours: cfg.enforceHours, workHours: cfg.workHours, workDays: cfg.workDays, stopList: store.stop.size,
+          enforceHours: cfg.enforceHours, workHours: cfg.workHours, workDays: cfg.workDays, stopList: store.stop.size, leads: store.contacted.size,
         });
       }
 

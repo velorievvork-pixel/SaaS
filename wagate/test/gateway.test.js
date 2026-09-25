@@ -107,12 +107,14 @@ describe('sending rules', () => {
   test('incoming opt-out lands on the stop list and survives a restart', async () => {
     const dir = tmp();
     const s1 = await newStore(dir);
+    s1.allow([KZ]);
     s1.addIncoming({ idMessage: 'm1', timestamp: 1, typeMessage: 'textMessage', chatId: `${KZ}@c.us`, textMessage: 'не пишите больше' });
     await s1.flush();
     assert.ok((await newStore(dir)).stop.has(KZ));
   });
   test('the same incoming message is stored once', () => {
     const g = { idMessage: 'm1', timestamp: 1, typeMessage: 'textMessage', chatId: `${KZ}@c.us`, textMessage: 'x' };
+    store.allow([KZ]);
     assert.equal(store.addIncoming(g), true);
     assert.equal(store.addIncoming(g), false);
   });
@@ -123,6 +125,61 @@ describe('sending rules', () => {
   });
   test('weak token is refused at start', () => {
     assert.throws(() => loadConfig({ WAGATE_TOKEN: 'short' }), /WAGATE_TOKEN/);
+  });
+});
+
+describe('privacy: only leads are read', () => {
+  const msg = (phone, id, text = 'личное') => ({ type: 'incoming', idMessage: id, timestamp: 1, typeMessage: 'textMessage',
+    chatId: `${phone}@c.us`, textMessage: text });
+
+  test('a personal chat is dropped: not kept, not queued, not written anywhere', async () => {
+    const dir = tmp();
+    const s = await newStore(dir);
+    assert.equal(s.addIncoming(msg(KZ2, 'p1')), false);
+    assert.deepEqual([s.incoming, s.queue], [[], []]);
+    await s.flush();
+    assert.equal(fs.existsSync(path.join(dir, 'incoming.jsonl')), false);
+    // even «не пишите» from a personal chat does not touch the stop list
+    s.addIncoming(msg(KZ2, 'p2', 'не пишите'));
+    assert.equal(s.stop.size, 0);
+  });
+  test('a number becomes a lead when the gateway writes to it or the agent registers it', async () => {
+    const dir = tmp();
+    const s = await newStore(dir);
+    s.addOutgoing({ type: 'outgoing', idMessage: 'o1', timestamp: 1, typeMessage: 'textMessage', chatId: `${KZ}@c.us`, textMessage: 'hi' });
+    assert.equal(s.addIncoming(msg(KZ, 'l1', 'Здравствуйте')), true);
+    assert.equal(s.allow(['+7 (701) 987-65-43', 'мусор', KZ2]), 1);   // duplicates and junk are skipped
+    assert.equal(s.addIncoming(msg(KZ2, 'l2')), true);
+    await s.flush();
+    const again = await newStore(dir);
+    assert.ok(again.isLead(KZ) && again.isLead(KZ2), 'allow list survives a restart');
+    assert.equal(again.isLead(RU), false);
+  });
+  test('an early reply from a lead messaged by hand is kept in memory until the lead is registered', async () => {
+    const dir = tmp();
+    const s = await newStore(dir);
+    const t0 = Date.now();
+    assert.equal(s.addIncoming(msg(KZ, 'r1', 'Здравствуйте, интересно'), t0), false);
+    assert.deepEqual(s.incoming, []);
+    await s.flush();
+    assert.equal(fs.existsSync(path.join(dir, 'incoming.jsonl')), false, 'nothing written while unknown');
+    s.allow([KZ], t0 + 3 * 3600e3);                       // next poll, 3 hours later
+    assert.deepEqual(s.incoming.map((m) => m.idMessage), ['r1']);
+    assert.equal(s.queue.length, 1);
+  });
+  test('messages from numbers that never become leads are forgotten after 48 hours', async () => {
+    const s = await newStore();
+    const t0 = Date.now();
+    s.addIncoming(msg(KZ2, 'p1'), t0);
+    s.allow([RU], t0 + 49 * 3600e3);                      // any later poll prunes expired ones
+    assert.equal(s.held.size, 0);
+    s.allow([KZ2], t0 + 50 * 3600e3);                     // too late: it was never kept
+    assert.deepEqual(s.incoming, []);
+  });
+  test('a lead registered by hand is not a new chat (no daily limit for the follow-up)', async () => {
+    const s = await newStore();
+    s.allow([KZ]);
+    assert.equal(checkSend({ phone: KZ, text: 'второе касание', store: s, cfg: cfgWith({ dailyNewChats: 0 }), now: TUE_11_ASTANA }).ok, true);
   });
 });
 
@@ -202,6 +259,15 @@ describe('HTTP API (Green-API compatible)', () => {
     assert.deepEqual(await (await call('qr')).json(), { type: 'qrCode', message: 'QRBASE64' });
     assert.equal((await (await call('getAuthorizationCode', { phoneNumber: KZ })).json()).code, 'ABCD-1234');
     wa._state = 'authorized';
+  });
+  test('wagateAllow registers leads; personal chats never reach lastIncomingMessages', async () => {
+    store.addIncoming({ type: 'incoming', idMessage: 'PERS', timestamp: Math.floor(TUE_11_ASTANA / 1000), typeMessage: 'textMessage',
+      chatId: '77055550000@c.us', textMessage: 'мама: купи хлеб' });
+    const inc = await (await fetch(`${base}/lastIncomingMessages/${TOKEN}?minutes=60`)).json();
+    assert.ok(!inc.some((m) => m.idMessage === 'PERS'));
+    const r = await call('wagateAllow', { phones: ['77770001122'] });
+    assert.equal((await r.json()).added, 1);
+    assert.equal((await call('wagateAllow', { phones: 'x' })).status, 400);
   });
   test('bad json and oversized body', async () => {
     const r = await fetch(`${base}/sendMessage/${TOKEN}`, { method: 'POST', body: '{' });

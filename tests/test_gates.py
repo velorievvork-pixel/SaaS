@@ -400,6 +400,24 @@ class TestWaInbox:
          "status": "no_whatsapp", "reply": "", "version": 2, "history": []},
     ]
 
+    def test_only_sent_leads_are_registered_with_the_gateway(self):
+        import io
+        import json as _json
+
+        import wa_inbox
+        rows = [*self.ROWS, {"id": "new-lead", "phone": "+7 777 000 11 22", "status": "new", "history": []}]
+        assert wa_inbox.sent_phones(rows) == ["77017620639", "77022432627"]
+        bodies = []
+
+        def opener(req, timeout):
+            bodies.append((req.full_url.split("/")[-2], req.get_method(),
+                           _json.loads(req.data) if req.data else None))
+            return io.BytesIO(b'{"added": 2}')
+
+        env = {"GREEN_API_ID": "7103", "GREEN_API_TOKEN": "secret"}
+        assert wa_inbox.register_leads(rows, env=env, opener=opener) == 2
+        assert bodies == [("wagateAllow", "POST", {"phones": ["77017620639", "77022432627"]})]
+
     def test_silent_after_three_workdays_not_calendar_days(self):
         import wa_inbox
         at = dt.datetime.fromisoformat

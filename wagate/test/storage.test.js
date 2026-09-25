@@ -28,6 +28,7 @@ async function contract(makeKv, reopen) {
 
   // The whole point: a restart (new process, new connection) sees the same session and messages.
   const store = await Store.open(kv);
+  store.allow([KZ]);
   store.addIncoming({ idMessage: 'm1', timestamp: Math.floor(Date.now() / 1000), typeMessage: 'textMessage',
     chatId: `${KZ}@c.us`, textMessage: 'Больше не пишите' });
   const auth = await useKvAuthState(kv);
