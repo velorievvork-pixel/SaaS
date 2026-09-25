@@ -1,0 +1,20 @@
+{
+  "name": "wagate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Свой шлюз WhatsApp с API как у Green-API: отправка, проверка номера, входящие, вебхук",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "baileys": "^7.0.0-rc14",
+    "pino": "^10.3.1",
+    "qrcode": "^1.5.4"
+  }
+}

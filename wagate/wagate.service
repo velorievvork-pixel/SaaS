@@ -1,0 +1,13 @@
+[Unit]
+Description=wagate: WhatsApp gateway
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/wagate
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=5
+User=wagate
+
+[Install]
+WantedBy=multi-user.target
