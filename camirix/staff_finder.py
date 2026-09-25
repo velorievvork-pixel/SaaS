@@ -11,6 +11,7 @@
 Два режима:
     python3 staff_finder.py kzpu.pro plitstroytorg.ru      # сам скачивает страницы
     python3 staff_finder.py --leads camirix/leads/*.yaml   # домены из карточек
+    python3 staff_finder.py --from-file domains.txt --top  # пакет обратной воронки
     python3 staff_finder.py --text page.md --domain tst-ur.ru
         # разбор текста, полученного через web_fetch, когда сайт закрыт для
         # прямого доступа (403, ошибка сертификата)
@@ -26,6 +27,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 PATHS = (
@@ -43,10 +45,6 @@ GENERIC = {
 }
 DEMO_DOMAINS = {"site.ru", "example.com", "example.ru", "mail.ru.demo", "aspro.ru",
                 "domain.ru", "yoursite.ru", "company.ru", "test.ru"}
-ROLE_TOP = ("генеральный директор", "гендиректор", "собственник", "учредитель",
-            "основатель", "владелец", "президент", "ceo", "founder", "директор")
-ROLE_MID = ("коммерческий директор", "руководитель", "начальник", "заместитель",
-            "управляющ", "head of")
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 MAILTO = re.compile(r"href\s*=\s*[\"']\s*mailto:\s*([^\"'?]+)", re.IGNORECASE)
 # Кириллица + казахские/узбекские буквы: «Даулетқызы Алия» иначе теряется.
@@ -92,17 +90,43 @@ def is_generic(local):
             or bool(re.fullmatch(r"[a-z]*\d+", local)))
 
 
+TOP_RE = re.compile(r"генеральный\s+директор|собственник|учредитель|основатель|"
+                    r"владелец|президент|председатель\s+совета|\bceo\b|founder")
+MID_RE = re.compile(r"коммерческий директор|финансовый директор|исполнительный директор|"
+                    r"технический директор|директор по \w+|заместител\w*|руководител\w*|"
+                    r"начальник\w*|управляющ\w*|советник\w*|помощник\w*|head of")
+DEPUTY = re.compile(r"(заместител\w*|советник\w*|помощник\w*)\s+(\S+\s+){0,2}$")
+
+
 def classify_role(ctx):
+    """Уровень должности, ближайшей к адресу (последней в тексте карточки).
+
+    Первое лицо — гендиректор, собственник и т. п. или «директор» без уточнения.
+    HR-директор, директор по развитию, заместитель и советник гендиректора — нет.
+    Берём последнее упоминание: левее может стоять должность соседа по странице."""
     low = ctx.lower()
-    if "коммерческий директор" in low or "финансовый директор" in low:
-        return "mid", next(r for r in ("коммерческий директор", "финансовый директор") if r in low)
-    for r in ROLE_TOP:
-        if r in low:
-            return "top", r
-    for r in ROLE_MID:
-        if r in low:
-            return "mid", r
-    return "staff", ""
+    found, spans = [], []
+    for m in TOP_RE.finditer(low):
+        spans.append(m.span())
+        if not DEPUTY.search(low[:m.start()]):
+            found.append((m.start(), "top", m.group(0)))
+    for m in MID_RE.finditer(low):
+        spans.append(m.span())
+        found.append((m.start(), "mid", m.group(0)))
+    for m in re.finditer(r"(?<![\w-])директор(?![\w-])", low):
+        if any(a <= m.start() < b for a, b in spans):
+            continue  # часть уже найденной должности («генеральный директор»)
+        prev = (low[:m.start()].split() or [""])[-1]
+        qualified = (re.search(r"(ый|ий|ой|ая|-)$", prev) or prev.startswith("заместител")
+                     or low[m.end():].lstrip().startswith("по "))
+        found.append((m.start(), "mid" if qualified else "top",
+                      "директор (с уточнением)" if qualified else "директор"))
+    for m in re.finditer(r"[\w]+-директор", low):
+        found.append((m.start(), "mid", m.group(0)))
+    if not found:
+        return "staff", ""
+    _, level, role = max(found, key=lambda f: (f[0], f[1] == "top"))
+    return level, role
 
 
 def nearest_name(before):
@@ -201,6 +225,36 @@ def leads_domains(files):
     return out
 
 
+def read_domains(path):
+    """Файл доменов: по одному на строку, «#» — комментарий, URL сводятся к домену."""
+    out = []
+    for raw in Path(path).read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            out.append(re.sub(r"^(https?:)?/*(www\.)?", "", line.lower()).split("/")[0])
+    return out
+
+
+def contacted_domains():
+    """Домены из contacted.csv: им уже писали, обходить незачем."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from lead_gate import load_contacted
+    except ImportError:
+        return set()
+    return {d for _, doms, _, _ in load_contacted() for d in doms}
+
+
+def top_candidates(report):
+    """Именные адреса первых лиц: то, ради чего обратная воронка и запускается."""
+    out = []
+    for d, rep in report.items():
+        for r in rep["rows"]:
+            if r["level"] == "top" and r["name"] and not r["generic"]:
+                out.append({"domain": d, **r})
+    return out
+
+
 def show(domain, rows, errors=(), aspro=False):
     named = [r for r in rows if not r["generic"]]
     print(f"\n=== {domain} — именных: {len(named)}, всего адресов: {len(rows)}"
@@ -223,6 +277,12 @@ def main():
     ap.add_argument("--leads", nargs="+", help="взять домены из карточек лидов")
     ap.add_argument("--text", help="файл с текстом/HTML страницы (из web_fetch)")
     ap.add_argument("--domain", help="домен для режима --text")
+    ap.add_argument("--from-file", help="файл со списком доменов (пакетный режим)")
+    ap.add_argument("--top", action="store_true",
+                    help="в конце — только именные адреса первых лиц (кандидаты в лиды)")
+    ap.add_argument("--include-contacted", action="store_true",
+                    help="не пропускать домены из contacted.csv")
+    ap.add_argument("--workers", type=int, default=8, help="параллельных сайтов")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
 
@@ -237,16 +297,36 @@ def main():
         return 0
 
     domains = list(a.domains) + (leads_domains(a.leads) if a.leads else [])
+    if a.from_file:
+        domains += read_domains(a.from_file)
     if not domains:
-        ap.error("нужны домены, --leads или --text")
+        ap.error("нужны домены, --leads, --from-file или --text")
+    domains = list(dict.fromkeys(domains))
+    if not a.include_contacted and not a.leads:
+        done = contacted_domains()
+        skipped = [d for d in domains if d in done]
+        domains = [d for d in domains if d not in done]
+        if skipped and not a.json:
+            print(f"пропущено (уже писали): {', '.join(skipped)}")
     report = {}
-    for d in dict.fromkeys(domains):
-        rows, errors, aspro = scan(d)
-        report[d] = {"rows": rows, "aspro": aspro, "errors": errors[-3:]}
-        if not a.json:
-            show(d, rows, errors, aspro)
+    with ThreadPoolExecutor(max_workers=max(1, a.workers)) as pool:
+        for d, (rows, errors, aspro) in zip(domains, pool.map(scan, domains), strict=True):
+            report[d] = {"rows": rows, "aspro": aspro, "errors": errors[-3:]}
     if a.json:
-        print(json.dumps(report, ensure_ascii=False, indent=1))
+        out = {"report": report, "top": top_candidates(report)} if a.top else report
+        print(json.dumps(out, ensure_ascii=False, indent=1))
+        return 0
+    if not a.top:
+        for d, rep in report.items():
+            show(d, rep["rows"], rep["errors"], rep["aspro"])
+    top = top_candidates(report)
+    if a.top or len(domains) > 1:
+        dead = sum(1 for rep in report.values() if not rep["rows"] and rep["errors"])
+        print(f"\n=== Итог: сайтов {len(domains)}, не открылись {dead}, "
+              f"именных адресов первых лиц: {len(top)}")
+        for r in top:
+            flag = " (ящик должности)" if r["role_box"] else ""
+            print(f"  {r['domain']:<24} {r['email']:<32} {r['name']} — {r['role']}{flag}")
     return 0
 
 

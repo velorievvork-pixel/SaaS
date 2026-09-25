@@ -483,3 +483,61 @@ class TestTemplateSkipped:
                             "--brief"], capture_output=True, text=True)
         assert "_TEMPLATE" not in r.stdout
         assert f"из {len(leads) - 1}" in r.stdout
+
+
+class TestStaffFinderBatch:
+    """Пакетный режим обратной воронки: список доменов → именные адреса первых лиц."""
+
+    def test_read_domains_strips_urls_and_comments(self, tmp_path):
+        import staff_finder
+        f = tmp_path / "d.txt"
+        f.write_text("# из поиска 25.09\nhttps://www.kzpu.pro/company/staff/\nTST-UR.ru  # ЛПР?\n\n",
+                     encoding="utf-8")
+        assert staff_finder.read_domains(f) == ["kzpu.pro", "tst-ur.ru"]
+
+    def test_top_candidates_only_named_first_persons(self):
+        import staff_finder
+        rows = [
+            {"email": "ceo@x.ru", "name": "Иванов Иван", "role": "генеральный директор",
+             "level": "top", "generic": False, "role_box": True},
+            {"email": "info@x.ru", "name": "", "role": "", "level": "staff",
+             "generic": True, "role_box": True},
+            {"email": "p.petrov@x.ru", "name": "Петров Пётр", "role": "руководитель",
+             "level": "mid", "generic": False, "role_box": False},
+        ]
+        top = staff_finder.top_candidates({"x.ru": {"rows": rows}})
+        assert [t["email"] for t in top] == ["ceo@x.ru"] and top[0]["domain"] == "x.ru"
+
+    def test_contacted_domains_read_from_registry(self):
+        import staff_finder
+        assert "kzpu.pro" in staff_finder.contacted_domains()
+
+
+class TestRoleLevels:
+    """25.09: пакетный прогон отнёс HR-директора и директора по развитию к первым лицам."""
+
+    @pytest.mark.parametrize("role,level", [
+        ("Генеральный директор", "top"), ("Директор", "top"),
+        ("Председатель совета директоров", "top"), ("Учредитель", "top"),
+        ("HR-директор", "mid"), ("Директор по развитию", "mid"),
+        ("Заместитель директора", "mid"), ("Финансовый директор", "mid"),
+        ("Технический директор", "mid"), ("Менеджер", "staff"),
+    ])
+    def test_level(self, role, level):
+        import staff_finder
+        assert staff_finder.classify_role(role)[0] == level
+
+
+class TestRoleNearestToEmail:
+    def test_deputy_of_general_is_not_first_person(self):
+        import staff_finder
+        assert staff_finder.classify_role("Первый заместитель генерального директора")[0] == "mid"
+        assert staff_finder.classify_role("Советник генерального директора")[0] == "mid"
+
+    def test_neighbour_ceo_without_email_does_not_leak(self):
+        """trinixgroup.com 25.09: у гендиректора нет адреса, следующая карточка — финдиректор."""
+        import staff_finder
+        text = ("Генеральный директор Гачегов Александр Владимирович Написать сообщение "
+                "Финансовый директор Темирова Мария Борисовна E-mail m.temirova@trinixgroup.ru")
+        r = staff_finder.extract(text, "trinixgroup.com")[0]
+        assert r["email"] == "m.temirova@trinixgroup.ru" and r["level"] == "mid"
