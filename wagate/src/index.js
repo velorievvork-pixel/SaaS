@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import pino from 'pino';
 import { Store, loadConfig } from './core.js';
 import { createServer } from './server.js';
+import { openKV } from './storage.js';
 import { WhatsApp } from './whatsapp.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -18,7 +19,9 @@ if (fs.existsSync(envFile)) {
 
 const cfg = loadConfig();
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
-const store = new Store(path.resolve(root, cfg.dataDir));
+const kv = await openKV({ databaseUrl: cfg.databaseUrl, dataDir: path.resolve(root, cfg.dataDir) });
+logger.info(cfg.databaseUrl ? 'хранилище: Postgres (DATABASE_URL)' : `хранилище: файлы в ${cfg.dataDir}`);
+const store = await Store.open(kv, { onError: (e) => logger.error(e, 'запись в хранилище не удалась') });
 
 async function webhook(g) {
   if (!cfg.webhookUrl) return;
@@ -38,7 +41,8 @@ async function webhook(g) {
 }
 
 const wa = new WhatsApp({
-  dataDir: path.resolve(root, cfg.dataDir),
+  kv,
+  pairPhone: cfg.pairPhone,
   logger,
   onIncoming: (g) => {
     if (store.addIncoming(g)) {
@@ -52,3 +56,13 @@ createServer({ cfg, wa, store, log: (...a) => logger.info(a.join(' ')) }).listen
   logger.info(`API: http://${cfg.host}:${cfg.port}/waInstance${cfg.id}/{method}/{token}`);
 });
 await wa.start();
+
+// Free Render sleeps after 15 minutes without inbound HTTP, which would drop the WhatsApp connection.
+// A request to our own public address every 10 minutes counts as inbound traffic and keeps it awake.
+const publicUrl = (process.env.KEEPALIVE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+if (publicUrl) {
+  setInterval(() => {
+    fetch(`${publicUrl}/health`, { signal: AbortSignal.timeout(30_000) }).catch(() => {});
+  }, 10 * 60_000).unref();
+  logger.info(`keepalive: ${publicUrl}/health каждые 10 минут`);
+}

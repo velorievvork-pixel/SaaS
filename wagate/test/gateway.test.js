@@ -8,6 +8,7 @@ import {
   Store, checkSend, digits, inWorkingHours, isOptOut, loadConfig, phoneFromChatId, toGreenMessage, utcOffset,
 } from '../src/core.js';
 import { createServer } from '../src/server.js';
+import { FileKV } from '../src/storage.js';
 
 const TOKEN = 'test-token-0123456789';
 // Tuesday 2026-09-29 06:00 UTC = 11:00 Astana (+5), 09:00 Moscow (+3)
@@ -15,6 +16,7 @@ const TUE_11_ASTANA = new Date('2026-09-29T06:00:00Z');
 const KZ = '77011234567', KZ2 = '77019876543', RU = '79161234567';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'wagate-'));
+const newStore = (dir = tmp()) => Store.open(new FileKV(dir));
 const cfgWith = (over = {}) => ({ ...loadConfig({ WAGATE_TOKEN: TOKEN, WAGATE_ID: '1101', MIN_INTERVAL_SEC: '0' }), ...over });
 
 describe('phones and time zones', () => {
@@ -74,7 +76,7 @@ describe('Baileys → Green-API message', () => {
 
 describe('sending rules', () => {
   let store;
-  beforeEach(() => { store = new Store(tmp()); });
+  beforeEach(async () => { store = await newStore(); });
   const out = (phone, t, extra = {}) => store.addOutgoing({ type: 'outgoing', idMessage: 'x', timestamp: t,
     typeMessage: 'textMessage', chatId: `${phone}@c.us`, textMessage: 'hi', newChat: true, ...extra });
 
@@ -102,16 +104,22 @@ describe('sending rules', () => {
     assert.equal(checkSend({ phone: KZ2, text: 'a', store, cfg: cfgWith(), now: new Date('2026-09-29T16:00:00Z') }).status, 425);
     assert.equal(checkSend({ phone: KZ2, text: 'a', store, cfg: cfgWith({ enforceHours: false }), now: new Date('2026-09-29T16:00:00Z') }).ok, true);
   });
-  test('incoming opt-out lands on the stop list and survives a restart', () => {
+  test('incoming opt-out lands on the stop list and survives a restart', async () => {
     const dir = tmp();
-    const s1 = new Store(dir);
+    const s1 = await newStore(dir);
     s1.addIncoming({ idMessage: 'm1', timestamp: 1, typeMessage: 'textMessage', chatId: `${KZ}@c.us`, textMessage: 'не пишите больше' });
-    assert.ok(new Store(dir).stop.has(KZ));
+    await s1.flush();
+    assert.ok((await newStore(dir)).stop.has(KZ));
   });
   test('the same incoming message is stored once', () => {
     const g = { idMessage: 'm1', timestamp: 1, typeMessage: 'textMessage', chatId: `${KZ}@c.us`, textMessage: 'x' };
     assert.equal(store.addIncoming(g), true);
     assert.equal(store.addIncoming(g), false);
+  });
+  test('listens on all interfaces only on Render or when asked', () => {
+    assert.equal(loadConfig({ WAGATE_TOKEN: TOKEN }).host, '127.0.0.1');
+    assert.equal(loadConfig({ WAGATE_TOKEN: TOKEN, RENDER: 'true' }).host, '0.0.0.0');
+    assert.equal(loadConfig({ WAGATE_TOKEN: TOKEN, PAIR_PHONE: '+7 701 123-45-67' }).pairPhone, KZ);
   });
   test('weak token is refused at start', () => {
     assert.throws(() => loadConfig({ WAGATE_TOKEN: 'short' }), /WAGATE_TOKEN/);
@@ -127,7 +135,7 @@ describe('HTTP API (Green-API compatible)', () => {
       exists: async (p) => wa.known.has(p),
       send: async (p, t) => { wa.sent.push([p, t]); return `ID${wa.sent.length}`; },
     };
-    store = new Store(tmp());
+    store = await newStore();
     clock = TUE_11_ASTANA;
     server = createServer({ cfg: cfgWith(), wa, store, now: () => clock });
     await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
@@ -164,7 +172,7 @@ describe('HTTP API (Green-API compatible)', () => {
     clock = TUE_11_ASTANA;
   });
   test('parallel sends cannot jump the daily limit', async () => {
-    const s = new Store(tmp());
+    const s = await newStore();
     const srv = createServer({ cfg: cfgWith({ dailyNewChats: 1 }), wa, store: s, now: () => TUE_11_ASTANA });
     await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
     const b = `http://127.0.0.1:${srv.address().port}/waInstance1101/sendMessage/${TOKEN}`;

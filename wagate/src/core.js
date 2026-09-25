@@ -1,8 +1,5 @@
 // Pure logic: phones and chat ids, Green-API message format, sending rules, storage.
 // Nothing here talks to WhatsApp, so all of it is unit-tested.
-import fs from 'node:fs';
-import path from 'node:path';
-
 // ---------- phones and chat ids ----------
 
 /** Digits only; a Russian/Kazakh "8XXXXXXXXXX" becomes "7XXXXXXXXXX". */
@@ -115,40 +112,48 @@ export const textOf = (g) => g?.textMessage ?? g?.extendedTextMessage?.text ?? g
 
 // ---------- storage ----------
 
-/** Append-only JSONL files plus the stop list; recent history is kept in memory. */
+const parseLines = (lines) => lines.flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
+
+/**
+ * Messages and the stop list. Recent history lives in memory for fast checks; every change is written
+ * through to the KV store (files or Postgres, see storage.js). Create with `await Store.open(kv)`.
+ */
 export class Store {
-  constructor(dir, keepDays = 14) {
-    this.dir = dir;
-    fs.mkdirSync(dir, { recursive: true });
+  static async open(kv, { keepDays = 14, onError = () => {} } = {}) {
+    const incoming = parseLines(await kv.readLog('incoming'));
+    const outgoing = parseLines(await kv.readLog('outgoing'));
+    const stop = JSON.parse((await kv.get('stoplist')) || '[]');
+    return new Store(kv, { incoming, outgoing, stop, keepDays, onError });
+  }
+
+  constructor(kv, { incoming = [], outgoing = [], stop = [], keepDays = 14, onError = () => {} } = {}) {
+    this.kv = kv;
+    this.onError = onError;
     const since = Date.now() / 1000 - keepDays * 86400;
-    this.incoming = this.#read('incoming.jsonl').filter((m) => m.timestamp >= since);
-    this.outgoing = this.#read('outgoing.jsonl').filter((m) => m.timestamp >= since);
-    this.stop = new Set(this.#readJson('stoplist.json', []));
-    this.contacted = new Set([...this.outgoing, ...this.incoming].map((m) => phoneFromChatId(m.chatId)));
+    // Everyone we ever talked to, not only the last two weeks: a reply to an old chat is not a new chat.
+    this.contacted = new Set([...outgoing, ...incoming].map((m) => phoneFromChatId(m.chatId)));
+    this.incoming = incoming.filter((m) => m.timestamp >= since);
+    this.outgoing = outgoing.filter((m) => m.timestamp >= since);
+    this.seen = new Set(this.incoming.map((m) => m.idMessage));
+    this.stop = new Set(stop);
     this.queue = [];      // notifications for receiveNotification / deleteNotification
     this.nextReceipt = 1;
+    this.pending = Promise.resolve();
   }
 
-  #read(name) {
-    const p = path.join(this.dir, name);
-    if (!fs.existsSync(p)) return [];
-    return fs.readFileSync(p, 'utf8').split('\n').filter(Boolean).flatMap((l) => {
-      try { return [JSON.parse(l)]; } catch { return []; }
-    });
+  #write(fn) {
+    this.pending = this.pending.then(fn).catch((e) => this.onError(e));
+    return this.pending;
   }
 
-  #readJson(name, dflt) {
-    try { return JSON.parse(fs.readFileSync(path.join(this.dir, name), 'utf8')); } catch { return dflt; }
-  }
-
-  #append(name, obj) {
-    fs.appendFileSync(path.join(this.dir, name), JSON.stringify(obj) + '\n');
-  }
+  /** Resolves when everything written so far has reached the store. */
+  flush() { return this.pending; }
 
   addIncoming(g) {
-    if (this.incoming.some((m) => m.idMessage === g.idMessage)) return false;   // WhatsApp resends on reconnect
+    if (this.seen.has(g.idMessage)) return false;   // WhatsApp resends on reconnect
+    this.seen.add(g.idMessage);
     this.incoming.push(g);
-    this.#append('incoming.jsonl', g);
+    this.#write(() => this.kv.append('incoming', JSON.stringify(g)));
     this.contacted.add(phoneFromChatId(g.chatId));
     if (isOptOut(textOf(g))) this.addStop(phoneFromChatId(g.chatId));
     this.queue.push({ receiptId: this.nextReceipt++, body: { typeWebhook: 'incomingMessageReceived', ...g } });
@@ -157,13 +162,14 @@ export class Store {
 
   addOutgoing(g) {
     this.outgoing.push(g);
-    this.#append('outgoing.jsonl', g);
+    this.#write(() => this.kv.append('outgoing', JSON.stringify(g)));
     this.contacted.add(phoneFromChatId(g.chatId));
   }
 
   addStop(phone) {
     this.stop.add(digits(phone));
-    fs.writeFileSync(path.join(this.dir, 'stoplist.json'), JSON.stringify([...this.stop], null, 1));
+    const list = JSON.stringify([...this.stop]);
+    this.#write(() => this.kv.set('stoplist', list));
   }
 
   last(list, minutes, now = Date.now()) {
@@ -213,9 +219,11 @@ export function loadConfig(env = process.env) {
   const cfg = {
     id: env.WAGATE_ID || '1101000001',
     token: env.WAGATE_TOKEN || '',
-    host: env.HOST || '127.0.0.1',
+    // On Render the platform proxy has to reach us, so listen on all interfaces there.
+    host: env.HOST || (env.RENDER ? '0.0.0.0' : '127.0.0.1'),
     port: num('PORT', 3000),
     dataDir: env.DATA_DIR || 'data',
+    databaseUrl: env.DATABASE_URL || '',
     webhookUrl: env.WEBHOOK_URL || '',
     webhookToken: env.WEBHOOK_TOKEN || '',
     pairPhone: digits(env.PAIR_PHONE || ''),

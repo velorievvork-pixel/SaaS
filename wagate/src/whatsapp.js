@@ -1,16 +1,16 @@
 // WhatsApp connection through Baileys (the WhatsApp Web protocol, linked device).
 // The phone stays the main device: the gateway is one of its "linked devices".
-import path from 'node:path';
-import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion, useMultiFileAuthState } from 'baileys';
+import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion } from 'baileys';
 import QRCode from 'qrcode';
+import { useKvAuthState } from './auth.js';
 import { toGreenMessage, toJid } from './core.js';
 
 export class WhatsApp {
   /**
    * onIncoming(greenMessage) is called for each new personal message from another person.
    */
-  constructor({ dataDir, logger, onIncoming, pairPhone = '' }) {
-    this.authDir = path.join(dataDir, 'auth');
+  constructor({ kv, logger, onIncoming, pairPhone = '' }) {
+    this.kv = kv;
     this.logger = logger;
     this.onIncoming = onIncoming;
     this.pairPhone = pairPhone;
@@ -24,7 +24,8 @@ export class WhatsApp {
   qr() { return this._qr; }
 
   async start() {
-    const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+    const { state, saveCreds, clear } = await useKvAuthState(this.kv);
+    this.clearSession = clear;
     let version;
     try { ({ version } = await fetchLatestBaileysVersion()); } catch { /* bundled version is fine */ }
     const sock = makeWASocket({
@@ -43,6 +44,7 @@ export class WhatsApp {
         this._state = 'notAuthorized';
         this._qr = (await QRCode.toDataURL(u.qr)).split(',')[1];
         this.logger.info('QR обновлён: откройте /waInstance{id}/qr/{token} или используйте код по номеру');
+        await this.#autoPair();
       }
       if (u.connection === 'open') {
         this._state = 'authorized';
@@ -53,9 +55,11 @@ export class WhatsApp {
       if (u.connection === 'close') {
         const code = u.lastDisconnect?.error?.output?.statusCode;
         if (code === DisconnectReason.loggedOut) {
-          // Unlinked from the phone: the saved session is dead, a new QR is needed.
+          // Unlinked from the phone: the saved session is dead. Forget it and start a fresh pairing.
           this._state = 'notAuthorized';
-          this.logger.warn('Сессия отвязана с телефона. Удалите data/auth и привяжите заново.');
+          this.logger.warn('Сессия отвязана с телефона: начинаю новую привязку (QR или код по номеру).');
+          await this.clearSession();
+          setTimeout(() => this.start().catch((e) => this.logger.error(e, 'restart failed')), 2000);
           return;
         }
         if (code === DisconnectReason.forbidden) {
@@ -83,6 +87,20 @@ export class WhatsApp {
         if (g) this.onIncoming(g);
       }
     });
+  }
+
+  // PAIR_PHONE set: ask for a pairing code by itself and print it in the log, so linking works on
+  // hosting without a console (Render). A code lives a few minutes; a new one every 3 minutes until linked.
+  async #autoPair() {
+    if (!this.pairPhone || Date.now() - (this.lastPairAt || 0) < 180_000) return;
+    this.lastPairAt = Date.now();
+    try {
+      const code = await this.sock.requestPairingCode(this.pairPhone);
+      this.logger.warn(`КОД ПРИВЯЗКИ для +${this.pairPhone}: ${code}  →  WhatsApp → Связанные устройства → `
+        + 'Привязка устройства → «Связать по номеру телефона». Действует несколько минут.');
+    } catch (e) {
+      this.logger.error(e, 'не удалось получить код привязки');
+    }
   }
 
   async pairingCode(phone) {
