@@ -541,3 +541,74 @@ class TestRoleNearestToEmail:
                 "Финансовый директор Темирова Мария Борисовна E-mail m.temirova@trinixgroup.ru")
         r = staff_finder.extract(text, "trinixgroup.com")[0]
         assert r["email"] == "m.temirova@trinixgroup.ru" and r["level"] == "mid"
+
+
+class TestWaFinder:
+    """wa_finder.py: номер WhatsApp только из контактов самой фирмы."""
+
+    def test_2gis_foreign_ads_are_cut(self):
+        """Dekmy 25.09: wa.me после «Похожие организации» — чужие фирмы."""
+        import wa_finder
+        page = ('<h1>Dekmy</h1> ТОО Millina Food <a href="tel:+77292544240">+7 (7292) 544-240</a>'
+                ' Похожие организации Реклама <a href="https://wa.me/77471590110">WhatsApp</a>')
+        found, cut = wa_finder.find(page, "https://2gis.kz/aktau/firm/1")
+        assert cut and found == []
+
+    def test_link_and_label_forms(self):
+        import wa_finder
+        page = ('<a href="https://api.whatsapp.com/send/?phone=77018013950&text">x</a>'
+                ' Телефоны: +7 (727) 357 30 90, + 7 771 780 06 16 (WhatsApp)')
+        nums = [f["number"] for f in wa_finder.find(page)[0]]
+        assert nums == ["77018013950", "77717800616"]  # городской без пометки не берём
+
+    def test_eight_prefix(self):
+        import wa_finder
+        assert wa_finder.digits("8 (700) 300-00-67") == "77003000067"
+
+
+class TestFunnel:
+    """funnel.py: одна компания из трёх источников — одна строка воронки."""
+
+    def _setup(self, tmp_path):
+        leads = tmp_path / "leads"
+        leads.mkdir()
+        (leads / "cheber-group-kg.yaml").write_text(
+            'company: ОсОО «АйнекСервис» (бренд «Cheber Group»)\ncountry: KG\nsent_on: "2026-09-24"\n'
+            'contact:\n  channel: phone\nnotes: >\n  25.09 ОТВЕТ: передадим руководству\n',
+            encoding="utf-8")
+        (leads / "safement-kz.yaml").write_text(
+            'company: ТОО «SAFEMENT»\ncountry: KZ\ndomain: safement.kz\nsent_on: "2026-09-25"\n'
+            'contact:\n  channel: whatsapp\n', encoding="utf-8")
+        reg = tmp_path / "contacted.csv"
+        reg.write_text("company,domain,date,channel,batch\n"
+                       "Cheber Group (АйнекСервис),,2026-09-24,whatsapp,2\n"
+                       "SAFEMENT,safement.kz,2026-09-25,whatsapp,3\n"
+                       "Арианстар,arianstar.ru,2026-09-22,email,1\n", encoding="utf-8")
+        ob = tmp_path / "outbox"
+        ob.mkdir()
+        (ob / "safement-kz.json").write_text(json.dumps(
+            {"company": "SAFEMENT", "country": "KZ", "status": "sent", "history": []}),
+            encoding="utf-8")
+        (ob / "nurtau-kz.json").write_text(json.dumps(
+            {"company": "NURTAU", "country": "KZ", "status": "sent", "history": []}),
+            encoding="utf-8")
+        return leads, reg, ob
+
+    def test_merge_stages_and_issues(self, tmp_path):
+        import funnel
+        leads, reg, ob = self._setup(tmp_path)
+        recs, issues = funnel.build(leads, reg, ob, dt.date(2026, 9, 25))
+        by = {r["company"]: r for r in recs}
+        assert len(recs) == 4  # Cheber не задвоился, Арианстар только в реестре
+        assert by["ОсОО «АйнекСервис» (бренд «Cheber Group»)"]["stage"] == "ответили"
+        assert by["Арианстар"]["stage"] == "молчат"  # 22.09 → 25.09: 3 рабочих дня
+        assert by["ТОО «SAFEMENT»"]["stage"] == "ждём"
+        assert any("NURTAU" in i and "нет карточки" in i for i in issues)
+        assert any("NURTAU" in i and "contacted.csv" in i for i in issues)
+
+    def test_summary_counts_replies(self, tmp_path):
+        import funnel
+        leads, reg, ob = self._setup(tmp_path)
+        recs, _ = funnel.build(leads, reg, ob, dt.date(2026, 9, 25))
+        s = funnel.summary(recs)["канал"]
+        assert s["whatsapp"] == {"отправлено": 3, "ответили": 1}
