@@ -19,21 +19,35 @@ export const toJid = (phone) => `${digits(phone)}@s.whatsapp.net`;
 
 // ---------- recipient's working hours ----------
 
-// Longest prefix wins. +7 is shared: Kazakhstan mobiles start with 70x/747/77x, the rest is Russia (Moscow time).
+// Longest prefix wins. +7 is shared: Kazakhstan numbers start with 76/77, the rest is Russia (Moscow time).
 const ZONES = [
-  ['76', 5], ['77', 5], ['7', 3],
-  ['998', 5], ['996', 6], ['992', 5], ['993', 5], ['375', 3], ['374', 4], ['994', 4], ['995', 4], ['373', 3],
+  ['76', 5, 'KZ'], ['77', 5, 'KZ'], ['7', 3, 'RU'],
+  ['998', 5, 'UZ'], ['996', 6, 'KG'], ['992', 5, 'TJ'], ['993', 5, 'TM'], ['375', 3, 'BY'], ['374', 4, 'AM'],
+  ['994', 4, 'AZ'], ['995', 4, 'GE'], ['373', 3, 'MD'],
 ];
 
-/** UTC offset in hours for the phone's country, or null if unknown. */
-export function utcOffset(phone) {
+// Public holidays with fixed dates (MM-DD). People do not do business chats on these days, and a cold
+// message on Republic Day reads like a bot. Moving holidays (Kurban Ait, Oraza Ait) are not listed.
+export const HOLIDAYS = {
+  KZ: ['01-01', '01-02', '01-07', '03-08', '03-21', '03-22', '03-23', '05-01', '05-07', '05-09', '07-06', '08-30',
+    '10-25', '12-16'],
+  RU: ['01-01', '01-02', '01-03', '01-04', '01-05', '01-06', '01-07', '01-08', '02-23', '03-08', '05-01', '05-09',
+    '06-12', '11-04'],
+  UZ: ['01-01', '01-14', '03-08', '03-21', '05-09', '09-01', '10-01', '12-08'],
+  KG: ['01-01', '01-07', '02-23', '03-08', '03-21', '05-01', '05-05', '05-09', '08-31', '11-07', '11-08'],
+  BY: ['01-01', '01-02', '01-07', '03-08', '05-01', '05-09', '07-03', '11-07', '12-25'],
+};
+
+function zone(phone) {
   const d = digits(phone);
   let best = null;
-  for (const [prefix, off] of ZONES) {
-    if (d.startsWith(prefix) && (!best || prefix.length > best[0].length)) best = [prefix, off];
-  }
-  return best ? best[1] : null;
+  for (const z of ZONES) if (d.startsWith(z[0]) && (!best || z[0].length > best[0].length)) best = z;
+  return best;
 }
+
+/** UTC offset in hours for the phone's country, or null if unknown. */
+export const utcOffset = (phone) => zone(phone)?.[1] ?? null;
+export const country = (phone) => zone(phone)?.[2] ?? null;
 
 /** Is it a working hour for the recipient? hours "9-18", days "1-5" (Mon=1). */
 export function inWorkingHours(phone, now = new Date(), hours = '9-18', days = '1-5') {
@@ -45,6 +59,9 @@ export function inWorkingHours(phone, now = new Date(), hours = '9-18', days = '
   const dow = local.getUTCDay() || 7;
   const hour = local.getUTCHours() + local.getUTCMinutes() / 60;
   if (dow < d0 || dow > d1) return { ok: false, reason: 'weekend', localTime: local.toISOString().slice(0, 16) };
+  if ((HOLIDAYS[country(phone)] || []).includes(local.toISOString().slice(5, 10))) {
+    return { ok: false, reason: 'holiday', localTime: local.toISOString().slice(0, 16) };
+  }
   if (hour < h0 || hour >= h1) return { ok: false, reason: 'off_hours', localTime: local.toISOString().slice(0, 16) };
   return { ok: true };
 }
@@ -250,6 +267,15 @@ export function checkSend({ phone, text, store, cfg, now = new Date() }) {
     && nowS - m.timestamp < 86400);
   if (dup) return { ok: false, status: 409, reason: 'duplicate_24h' };
 
+  // The same long text to several people in a day is a mailing: it reads as a bot and WhatsApp bans for it.
+  // Short phrases («Спасибо большое!») are fine to repeat.
+  const norm = (t) => String(t).toLowerCase().replace(/\s+/g, ' ').trim();
+  if (norm(text).length >= 60) {
+    const others = new Set(store.outgoing.filter((m) => nowS - m.timestamp < 86400 && norm(m.textMessage || '') === norm(text)
+      && phoneFromChatId(m.chatId) !== d).map((m) => m.chatId));
+    if (others.size >= cfg.sameTextLimit) return { ok: false, status: 409, reason: 'same_text_many', sentTo: others.size };
+  }
+
   const isNew = !store.contacted.has(d);
   if (isNew) {
     const dayStart = new Date(now); dayStart.setUTCHours(0, 0, 0, 0);
@@ -282,6 +308,7 @@ export function loadConfig(env = process.env) {
     workHours: env.WORK_HOURS || '9-18',
     workDays: env.WORK_DAYS || '1-5',
     maxLength: num('MAX_LENGTH', 2000),
+    sameTextLimit: num('SAME_TEXT_LIMIT', 2),
   };
   if (cfg.token.length < 16) throw new Error('WAGATE_TOKEN не задан или короче 16 символов (см. .env.example)');
   return cfg;

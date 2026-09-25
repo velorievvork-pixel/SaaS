@@ -43,6 +43,23 @@ class TestGuard(unittest.TestCase):
         self.assertTrue(any(r.startswith("F1") for r in reasons))
 
 
+class TestHumanVoice(unittest.TestCase):
+    def test_bureaucratic_reply_is_blocked(self):
+        bad = "Благодарим за ваш ответ! Будем рады сотрудничеству. С уважением, Ярослав"
+        reasons = wa_send.guard(bad, "reply")
+        self.assertTrue(sum(r.startswith("H1") for r in reasons) >= 3, reasons)
+
+    def test_reply_much_longer_than_theirs_is_blocked(self):
+        long = " ".join(["слово"] * 40) + "."
+        self.assertTrue(any(r.startswith("H3") for r in wa_send.guard(long, "reply", "не интересует")))
+
+    def test_unfilled_template_is_blocked(self):
+        self.assertTrue(any(r.startswith("H4") for r in wa_send.guard("Виктория, добрый день! Скажите, …?", "reply")))
+
+    def test_human_reply_passes(self):
+        self.assertEqual(wa_send.guard("Понял, спасибо, что ответили! Хорошего дня.", "reply", "не интересует"), [])
+
+
 class TestSend(unittest.TestCase):
     def test_ok(self):
         calls = []

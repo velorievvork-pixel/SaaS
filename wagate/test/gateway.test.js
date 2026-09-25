@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import {
-  Store, checkSend, digits, inWorkingHours, isOptOut, loadConfig, phoneFromChatId, toGreenMessage, utcOffset,
+  Store, checkSend, country, digits, inWorkingHours, isOptOut, loadConfig, phoneFromChatId, toGreenMessage, utcOffset,
 } from '../src/core.js';
 import { createServer } from '../src/server.js';
 import { FileKV } from '../src/storage.js';
@@ -30,6 +30,15 @@ describe('phones and time zones', () => {
     assert.equal(utcOffset(RU), 3);
     assert.equal(utcOffset('996555123456'), 6);
     assert.equal(utcOffset('12025550100'), null);
+  });
+  test('no messages on public holidays of the recipient\'s country', () => {
+    const ordinaryMonday = new Date('2026-10-26T06:00:00Z');
+    const kzHoliday = new Date('2027-10-25T06:00:00Z');     // Monday, Republic Day in Kazakhstan
+    assert.deepEqual([country(KZ), country(RU), country('996555123456')], ['KZ', 'RU', 'KG']);
+    assert.equal(inWorkingHours(KZ, kzHoliday).reason, 'holiday');
+    assert.equal(inWorkingHours(RU, kzHoliday).ok, true);   // not a holiday in Russia
+    assert.equal(inWorkingHours(RU, new Date('2026-11-04T08:00:00Z')).reason, 'holiday');
+    assert.equal(inWorkingHours(KZ, ordinaryMonday).ok, true);
   });
   test('working hours are the recipient\'s, not ours', () => {
     assert.equal(inWorkingHours(KZ, TUE_11_ASTANA).ok, true);
@@ -97,6 +106,17 @@ describe('sending rules', () => {
   test('same text to the same number within a day is refused', () => {
     out(KZ, TUE_11_ASTANA.getTime() / 1000 - 3600);
     assert.equal(checkSend({ phone: KZ, text: 'hi', store, cfg: cfgWith(), now: TUE_11_ASTANA }).reason, 'duplicate_24h');
+  });
+  test('the same long text to many people in a day is refused, short phrases are fine', () => {
+    const long = 'Здравствуйте! Меня зовут Ярослав, я из компании Camirix. Вижу, что вы ищете менеджера.';
+    const t = TUE_11_ASTANA.getTime() / 1000 - 600;
+    out(KZ, t, { textMessage: long });
+    out(RU, t, { textMessage: long });
+    const cfg = cfgWith({ dailyNewChats: 99 });
+    assert.equal(checkSend({ phone: KZ2, text: long, store, cfg, now: TUE_11_ASTANA }).reason, 'same_text_many');
+    out(KZ, t, { textMessage: 'Спасибо большое!' });
+    out(RU, t, { textMessage: 'Спасибо большое!' });
+    assert.equal(checkSend({ phone: KZ2, text: 'Спасибо большое!', store, cfg, now: TUE_11_ASTANA }).ok, true);
   });
   test('stop list and off hours', () => {
     store.addStop(KZ);

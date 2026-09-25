@@ -29,6 +29,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / ".claude" / "hooks"))
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE / "agent"))
+import humanity  # noqa: E402
 from outbound_guard import check_send  # noqa: E402
 from wa_inbox import DEFAULT_API, digits  # noqa: E402
 
@@ -38,6 +40,8 @@ SKIP = {"first": (), "followup": ("W1",), "reply": ("W1", "W2")}
 REASONS = {
     "off_hours": "у адресата нерабочее время, отправить позже",
     "weekend": "у адресата выходной, отправить в рабочий день",
+    "holiday": "у адресата государственный праздник, отправить на следующий рабочий день",
+    "same_text_many": "этот текст сегодня уже ушёл нескольким людям: переписать под этого человека",
     "unknown_country": "страна номера неизвестна шлюзу, проверьте номер",
     "daily_new_chat_limit": "дневной лимит новых чатов исчерпан, продолжить завтра",
     "too_soon": "слишком частые новые чаты, повторить через паузу",
@@ -48,9 +52,10 @@ REASONS = {
 }
 
 
-def guard(text, kind):
-    """Причины не отправлять (пусто — можно)."""
-    return [r for r in check_send({"body": text, "to": []}) if not r.startswith(SKIP[kind])]
+def guard(text, kind, their_text=""):
+    """Причины не отправлять (пусто — можно): правила писем и «пишет как человек» (voice.md)."""
+    rules = [r for r in check_send({"body": text, "to": []}) if not r.startswith(SKIP[kind])]
+    return rules + humanity.check(text, kind, their_text)
 
 
 def send(phone, text, env=None, opener=urllib.request.urlopen):
@@ -86,12 +91,13 @@ def main(argv=None):
     src.add_argument("--text")
     src.add_argument("--file")
     ap.add_argument("--kind", choices=list(SKIP), default="first")
+    ap.add_argument("--their", default="", help="их последнее сообщение (для длины ответа)")
     ap.add_argument("--dry-run", action="store_true", help="только проверить текст")
     a = ap.parse_args(argv)
     text = a.text if a.text is not None else Path(a.file).read_text(encoding="utf-8")
     text = text.strip()
 
-    problems = guard(text, a.kind)
+    problems = guard(text, a.kind, a.their)
     if problems:
         out({"ok": False, "stage": "guard", "reasons": problems})
         return 1

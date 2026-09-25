@@ -43,18 +43,51 @@ def test_other_replies(text, category):
 def test_route_refusal_gives_close_text_and_status():
     r = router.route("Здравствуйте не интересует", "cbc-astana-kz")
     assert (r["action"], r["status"]) == ("reply_refusal", "refused")
-    assert r["draft"] == "Понял, спасибо, что ответили. Если ситуация изменится, пишите."
+    assert r["draft"] == "Понял, спасибо, что ответили! Хорошего дня."
     assert not r["needs_edit"]
-
-
-def test_refusal_uses_topic_from_card():
-    card = {"topic": "с заявками из регионов что-то"}
-    assert router.draft("refusal", card).endswith("Если с заявками из регионов что-то изменится, пишите.")
 
 
 def test_contact_draft_must_be_finished_by_agent():
     r = router.route("+7 700 760 0141 Виктория", "agrotop-kz")
     assert r["contacts"] and r["needs_edit"]
+
+
+AGROTOP = ("Здравствуйте! Меня зовут Радмила, я менеджер компании Агротоп. +7 700 760 0141 Виктория. "
+           "Можете обратиться по этому номеру")
+
+
+def test_names_from_a_real_reply():
+    assert router.their_name(AGROTOP) == "Радмила"
+    assert router.contact_name(AGROTOP, "ТОО «Агротоп»") == "Виктория"
+    drafts = router.route(AGROTOP, "agrotop-kz")["drafts"]
+    assert drafts[0] == {"to": "them", "text": "Радмила, спасибо большое!"}
+    assert drafts[1]["text"].startswith("Виктория, добрый день! Ваш номер мне дала Радмила из компании Агротоп.")
+
+
+def test_indirect_case_name_is_not_used_as_greeting():
+    drafts = router.draft("contact_given", {"company": "ООО «Ромашка»"}, "Звоните Ерлану +7 701 111 22 33")
+    assert drafts[1]["text"].startswith("Добрый день! Ваш номер мне дали в компании Ромашка.")
+
+
+def test_forwarded_asks_the_name_only_when_unknown():
+    cheber = "Здравствуйте! Передадим ваше сообщение и номер руководству, с вами свяжутся от Cheber group"
+    assert "как вас зовут" in router.route(cheber)["draft"]
+    named = "Это Айгуль, передам руководству"
+    assert router.route(named)["draft"] == "Айгуль, спасибо! Буду ждать."
+
+
+def test_asked_if_bot_is_honest_and_goes_to_owner():
+    r = router.route("Вы бот что ли?")
+    assert (r["category"], r["action"]) == ("asked_if_bot", "reply_bot_question")
+    assert "ассистент" in r["draft"]
+    assert autonomy.decide("reply_bot_question")["mode"] == "ask"
+
+
+@pytest.mark.parametrize("category", ["refusal", "forwarded", "price", "proposal", "asked_if_bot"])
+def test_every_template_passes_the_human_check(category):
+    import humanity
+    for d in router.draft(category, {"company": "ТОО «Агротоп»"}, "Здравствуйте"):
+        assert humanity.check(d["text"], "reply", "Здравствуйте, сколько стоит и как это работает у вас?") == []
 
 
 def test_every_router_action_is_in_the_policy():

@@ -19,11 +19,13 @@ actions:
   reply_proposal:     learn   # «пришлите КП» → сначала 15 минут с Артёмом
   reply_meeting:      ask     # согласны на созвон → передача Артёму (нужны его слоты)
   reply_question:     ask     # вопрос по сути → ответ только из facts.yaml
+  reply_bot_question: ask     # «вы бот?» → честно: пишет с помощью ассистента, владелец смотрит; никогда не отрицать
   reply_unclear:      ask     # всё, что агент не узнал
   handoff:            ask     # группа с Артёмом и справка для него
 
 # Никогда не делать сам, какой бы ни была статистика
 never_auto:
+  - reply_bot_question
   - reply_meeting
   - handoff
 

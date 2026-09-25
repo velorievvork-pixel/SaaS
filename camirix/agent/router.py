@@ -26,6 +26,15 @@ EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 
 # Порядок важен: первое совпадение побеждает.
 RULES = [
+    # Прямой вопрос «вы бот?» — честный ответ и всегда через владельца (policy: never_auto).
+    (
+        "asked_if_bot",
+        re.compile(
+            r"(ты|вы)\s+(что\s+)?(бот|робот)|это\s+(бот|робот|автоответ)|нейросет|chatgpt|gpt"
+            r"|искусственн\w+\s+интеллект|\bии\s+(пишет|отвечает)|живой\s+человек",
+            re.IGNORECASE,
+        ),
+    ),
     (
         "opt_out",
         re.compile(
@@ -86,6 +95,7 @@ GREETING = re.compile(
 )
 
 ACTION = {  # категория → действие из policy.yaml
+    "asked_if_bot": "reply_bot_question",
     "opt_out": "reply_opt_out",
     "autoreply": None,
     "refusal": "reply_refusal",
@@ -101,21 +111,30 @@ ACTION = {  # категория → действие из policy.yaml
 
 STATUS = {"opt_out": "refused", "refusal": "refused", "autoreply": None, "greeting": "replied"}
 
+# Шаблоны по voice.md: коротко, разговорно, по имени, один вопрос. {hi} — «Радмила, » или пусто.
 TEMPLATES = {
-    "refusal": "Понял, спасибо, что ответили. Если {topic} изменится, пишите.",
-    "forwarded": "Спасибо! Буду ждать. Подскажите, с кем из руководства лучше держать связь?",
+    "refusal": "{Hi}понял, спасибо, что ответили! Хорошего дня.",
+    "forwarded": "{Hi}спасибо! Буду ждать. А как вас зовут, чтобы я знал, кому писать, если что?",
+    "forwarded_named": "{Hi}спасибо! Буду ждать.",
     "price": (
-        "Готового прайса нет, стоимость зависит от задачи. Артём, основатель Camirix, назовёт её "
-        "на коротком звонке, когда поймёт, что нужно именно вам. Вам удобнее во вторник в 11:00 "
-        "или в среду в 15:00 по {tz}?"
+        "{Hi}честно, от задачи сильно зависит. Давайте Артём, наш основатель, "
+        "за 15 минут посмотрит и сразу скажет цифру. Вам удобнее во вторник или в среду?"
     ),
     "proposal": (
-        "Пришлю, но без 15 минут разговора оно будет общим. Давайте Артём сначала уточнит задачу, "
-        "а КП придёт уже под вас. Вам удобнее во вторник в 11:00 или в среду в 15:00 по {tz}?"
+        "{Hi}конечно. Только скажите в двух словах, что сейчас больше всего съедает время, "
+        "чтобы я прислал по делу, а не общую презентацию."
     ),
-    "contact_given": (
-        "Здравствуйте! Меня зовут Ярослав, я из компании Camirix. Этот номер мне дали в {company}. "
-        "Вижу, что вы ищете {vacancy}: {process_short}. Подскажите, {warm_question}"
+    "contact_given": "{Hi}спасибо большое!",
+    # Только черновик для владельца: на «вы бот?» агент сам не отвечает (never_auto). Если владелец
+    # возьмёт этот текст, он честный: тексты готовит ассистент, владелец их смотрит. Не отрицать.
+    "asked_if_bot": (
+        "{Hi}честно, сообщения мне помогает писать ассистент, но переписку я смотрю сам. "
+        "А на звонке будет живой Артём, наш основатель."
+    ),
+    # Новому человеку, чей номер дали: кто дал номер, кто мы одной фразой, один лёгкий вопрос.
+    "warmup": (
+        "{contact_hi}добрый день! Ваш номер мне {gave} {giver}. Я Ярослав из Camirix, "
+        "мы автоматизируем рутину поверх 1С. Скажите, {warm_question}"
     ),
 }
 
@@ -151,36 +170,116 @@ def load_card(lead):
     return load_lead(p.read_text(encoding="utf-8")) if p.exists() else {}
 
 
-def draft(category, card):
-    tpl = TEMPLATES.get(category)
+NAME = r"([А-ЯЁ][а-яё]{2,14})"
+SELF_NAME = [
+    re.compile(r"(?i:меня\s+зовут)\s+" + NAME),
+    re.compile(r"(?:^|[,.!]\s*)(?i:это)\s+" + NAME + r"\b"),
+    re.compile(NAME + r",\s*(?i:менеджер|секретар|администратор|бухгалтер|помощник)"),
+]
+NOT_NAMES = {
+    "Здравствуйте",
+    "Добрый",
+    "Спасибо",
+    "Меня",
+    "Можете",
+    "Передадим",
+    "Компания",
+    "Менеджер",
+    "Обратитесь",
+    "Звоните",
+    "Пишите",
+    "Номер",
+    "Телефон",
+}
+
+
+def their_name(text):
+    """Имя того, кто ответил («Меня зовут Радмила», «Радмила, менеджер»), или ''."""
+    for rx in SELF_NAME:
+        m = rx.search(text or "")
+        if m and m.group(1) not in NOT_NAMES:
+            return m.group(1)
+    return ""
+
+
+def contact_name(text, company=""):
+    """Имя человека рядом с переданным номером («+7 700 760 0141 Виктория»), или ''.
+    Сначала слово сразу после номера, потом перед ним; название компании именем не считается."""
+    t = text or ""
+    skip = NOT_NAMES | {their_name(t)} | set(re.findall(r"[А-ЯЁ][а-яё]+", company or ""))
+    for m in PHONE.finditer(t):
+        for chunk in (t[m.end() : m.end() + 25], t[max(0, m.start() - 25) : m.start()]):
+            names = [w for w in re.findall(NAME, chunk) if w not in skip]
+            if names:
+                return names[0]
+    return ""
+
+
+def nominative(name):
+    """Имя годится для обращения, только если похоже на именительный падеж: «Звоните Ерлану»,
+    «номер Виктории» — косвенный падеж, «Ерлану, добрый день» звучит как бот. Тогда без имени."""
+    return name if name and not name.endswith(("у", "ю", "е", "и", "ом", "ой")) else ""
+
+
+def short_company(company):
+    """«ТОО «Агротоп» (бренд …)» → «Агротоп»: так компанию называет человек, а не реестр."""
+    c = re.sub(r"\(.*?\)", "", company or "")
+    c = re.sub(r"\b(ТОО|ООО|ОсОО|АО|ЗАО|ИП|LLP|LLC)\b", "", c)
+    return re.sub(r"[«»\"']", "", c).strip(" ,.") or ""
+
+
+def hi(name):
+    return f"{name}, " if name else ""
+
+
+def cap(text):
+    return text[:1].upper() + text[1:]
+
+
+def draft(category, card, text=""):
+    """Черновики: [{"to": "them"|"contact", "text": ...}].
+    «…» — место, которое агент дописывает сам."""
+    me = their_name(text)
+    fields = {"Hi": hi(me), "company": short_company(card.get("company")) or "вашей компании"}
+    key = "forwarded_named" if category == "forwarded" and me else category
+    tpl = TEMPLATES.get(key)
     if not tpl:
-        return ""
-    process = str(card.get("process_to_automate") or "").split(".")[0].split(":")[0].strip()
-    # Тема для отказа в нужном падеже из карточки не соберёшь: берём готовую фразу, если она есть
-    # (поле topic: «с заявками из регионов что-то»), иначе нейтрально.
-    topic = str(card.get("topic") or "").strip() or "ситуация"
-    fields = {
-        "topic": topic,
-        "process": (process[:1].lower() + process[1:80]) if process else "этой задачей",
-        "tz": TZ_NAME.get(str(card.get("country") or "KZ"), "Астане"),
-        "company": card.get("company") or "вашей компании",
-        "vacancy": str((card.get("vacancy") or {}).get("title") or "сотрудника").lower(),
-        "process_short": process[:120] or "…",
-        "warm_question": "…?",
-    }
-    return tpl.format(**fields)
+        return []
+    out = [{"to": "them", "text": cap(tpl.format(**fields))}]
+    if category == "contact_given":
+        who = nominative(contact_name(text, card.get("company") or ""))
+        female = me.endswith(("а", "я"))
+        giver = f"{me} из компании {fields['company']}" if me else f"в компании {fields['company']}"
+        gave = ("дала" if female else "дал") if me else "дали"
+        warm = str(card.get("warm_question") or "…?")
+        out.append(
+            {
+                "to": "contact",
+                "text": cap(
+                    TEMPLATES["warmup"].format(
+                        contact_hi=hi(who), gave=gave, giver=giver, warm_question=warm
+                    )
+                ),
+            }
+        )
+    return out
 
 
 def route(text, lead=None):
     category, contacts = classify(text)
     card = load_card(lead)
+    drafts = draft(category, card, text)
     return {
         "category": category,
         "action": ACTION[category],
         "status": STATUS.get(category, "replied"),
         "contacts": contacts,
-        "draft": draft(category, card),
-        "needs_edit": "…" in draft(category, card),  # шаблон с дырами агент обязан дописать сам
+        "their_name": their_name(text),
+        "contact_name": contact_name(text, card.get("company") or ""),
+        "drafts": drafts,
+        "draft": drafts[0]["text"] if drafts else "",
+        # шаблон с «…» агент обязан дописать сам, по карточке лида и voice.md
+        "needs_edit": any("…" in d["text"] for d in drafts),
     }
 
 
