@@ -41,6 +41,7 @@ function readBody(req) {
 export function createHandler({ cfg, wa, store, now = () => new Date(), log = () => {} }) {
   // Sends go one at a time: two parallel requests must not both pass the daily limit check.
   let sendLock = Promise.resolve();
+  const checks = { day: '', n: 0 };
   const serial = (fn) => {
     const run = sendLock.then(fn, fn);
     sendLock = run.catch(() => {});
@@ -101,7 +102,16 @@ export function createHandler({ cfg, wa, store, now = () => new Date(), log = ()
           return send(verdict.status, { error: verdict.reason, ...verdict, ok: undefined, status: undefined });
         }
         if (verdict.newChat && !(await wa.exists(phone))) return send(404, { error: 'no_whatsapp' });
-        const idMessage = await wa.send(phone, body.message);
+        let idMessage;
+        try {
+          idMessage = await wa.send(phone, body.message);
+        } catch (e) {
+          log('send failed', phone, e.message);
+          if (!verdict.newChat) return send(502, { error: 'send_failed' });
+          const until = now().getTime() + cfg.pauseHours * 3600e3;
+          store.pauseNewChats(until);
+          return send(502, { error: 'send_failed', newChatsPausedUntil: new Date(until).toISOString() });
+        }
         store.addOutgoing({
           type: 'outgoing', idMessage, timestamp: Math.floor(now().getTime() / 1000), typeMessage: 'textMessage',
           chatId: toChatId(phone), textMessage: body.message, newChat: verdict.newChat,
@@ -116,6 +126,12 @@ export function createHandler({ cfg, wa, store, now = () => new Date(), log = ()
         const phone = digits(body.phoneNumber);
         if (phone.length < 10) return send(400, { error: 'phoneNumber' });
         if (needAuth()) return;
+        // WhatsApp forbids automated harvesting of numbers (faq.whatsapp.com/361005896189245):
+        // check only numbers about to be messaged, a few dozen a day.
+        const day = now().toISOString().slice(0, 10);
+        if (checks.day !== day) Object.assign(checks, { day, n: 0 });
+        if (checks.n >= cfg.checkLimit) return send(429, { error: 'check_limit', limit: cfg.checkLimit });
+        checks.n += 1;
         return send(200, { existsWhatsapp: await wa.exists(phone) });
       }
 
@@ -153,6 +169,8 @@ export function createHandler({ cfg, wa, store, now = () => new Date(), log = ()
           newChatsToday: newToday, dailyNewChats: dailyNewChatLimit(store, cfg, now()), dailyNewChatsMax: cfg.dailyNewChats,
           linkedAt: store.linkedAt ? new Date(store.linkedAt).toISOString() : null, replies30d: store.replyStats(30, now().getTime()), minIntervalSec: cfg.minIntervalSec,
           enforceHours: cfg.enforceHours, workHours: cfg.workHours, workDays: cfg.workDays, stopList: store.stop.size, leads: store.contacted.size,
+          newChatsPausedUntil: store.pausedUntil > now().getTime() ? new Date(store.pausedUntil).toISOString() : null,
+          checksToday: checks.day === now().toISOString().slice(0, 10) ? checks.n : 0, checkLimit: cfg.checkLimit,
         });
       }
 

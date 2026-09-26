@@ -8,7 +8,7 @@ import {
   Store, checkSend, country, typingMs, digits, inWorkingHours, isOptOut, loadConfig, phoneFromChatId, toGreenMessage, utcOffset,
 } from '../src/core.js';
 import { createServer } from '../src/server.js';
-import { FileKV } from '../src/storage.js';
+import { FileKV, MemoryKV } from '../src/storage.js';
 
 const TOKEN = 'test-token-0123456789';
 // Tuesday 2026-09-29 06:00 UTC = 11:00 Astana (+5), 09:00 Moscow (+3)
@@ -308,6 +308,34 @@ describe('HTTP API (Green-API compatible)', () => {
     const codes = (await Promise.all([post(KZ), post(KZ2)])).map((r) => r.status).sort();
     srv.close();
     assert.deepEqual(codes, [200, 429]);
+  });
+  test('a failed send to a new chat pauses new chats for a day; replies still go; survives restart', async () => {
+    const kv = new MemoryKV();
+    const s = await Store.open(kv);
+    s.allow([KZ]);                                                   // an existing chat
+    const failing = { ...wa, send: async () => { throw new Error('restricted'); } };
+    const srv = createServer({ cfg: cfgWith(), wa: failing, store: s, now: () => TUE_11_ASTANA });
+    await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+    const b = `http://127.0.0.1:${srv.address().port}/waInstance1101`;
+    const post = (p) => fetch(`${b}/sendMessage/${TOKEN}`, { method: 'POST', body: JSON.stringify({ chatId: `${p}@c.us`, message: 'x' }) });
+    const r = await post(KZ2);
+    assert.equal(r.status, 502);
+    assert.ok((await r.json()).newChatsPausedUntil);
+    srv.close();
+    assert.equal(checkSend({ phone: '77015550000', text: 'y', store: s, cfg: cfgWith(), now: TUE_11_ASTANA }).reason, 'new_chats_paused');
+    assert.equal(checkSend({ phone: KZ, text: 'ответ', store: s, cfg: cfgWith(), now: TUE_11_ASTANA }).ok, true);
+    const tomorrow = new Date(TUE_11_ASTANA.getTime() + 25 * 3600e3);
+    assert.notEqual(checkSend({ phone: '77015550000', text: 'y', store: s, cfg: cfgWith(), now: tomorrow }).reason, 'new_chats_paused');
+    await s.flush();
+    assert.equal((await Store.open(kv)).pausedUntil, s.pausedUntil);   // restart keeps the pause
+  });
+  test('checkWhatsapp has a daily limit (no bulk lookups)', async () => {
+    const srv = createServer({ cfg: cfgWith({ checkLimit: 2 }), wa, store, now: () => TUE_11_ASTANA });
+    await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+    const u = `http://127.0.0.1:${srv.address().port}/waInstance1101/checkWhatsapp/${TOKEN}`;
+    const chk = () => fetch(u, { method: 'POST', body: JSON.stringify({ phoneNumber: KZ2 }) }).then((r) => r.status);
+    assert.deepEqual([await chk(), await chk(), await chk()], [200, 200, 429]);
+    srv.close();
   });
   test('checkWhatsapp', async () => {
     assert.deepEqual(await (await call('checkWhatsapp', { phoneNumber: Number(KZ2) })).json(), { existsWhatsapp: true });

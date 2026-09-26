@@ -166,11 +166,13 @@ export class Store {
     const stop = JSON.parse((await kv.get('stoplist')) || '[]');
     const allowed = JSON.parse((await kv.get('allowlist')) || '[]');
     const linkedAt = Number(await kv.get('linked_at')) || 0;
-    return new Store(kv, { incoming, outgoing, stop, allowed, linkedAt, keepDays, onError });
+    const pausedUntil = Number(await kv.get('paused_until')) || 0;
+    return new Store(kv, { incoming, outgoing, stop, allowed, linkedAt, pausedUntil, keepDays, onError });
   }
 
   constructor(kv, {
-    incoming = [], outgoing = [], stop = [], allowed = [], linkedAt = 0, keepDays = 30, onError = () => {},
+    incoming = [], outgoing = [], stop = [], allowed = [], linkedAt = 0, pausedUntil = 0, keepDays = 30,
+    onError = () => {},
   } = {}) {
     this.kv = kv;
     this.onError = onError;
@@ -180,6 +182,7 @@ export class Store {
     // their messages are dropped on arrival, never stored, never returned by the API.
     this.allowed = new Set(allowed);
     this.linkedAt = linkedAt;   // when this number was first linked: new numbers warm up slowly
+    this.pausedUntil = pausedUntil;   // ms; new chats are off until then (after a failed send)
     this.contacted = new Set([...outgoing.map((m) => phoneFromChatId(m.chatId)), ...this.allowed]);
     this.incoming = incoming.filter((m) => m.timestamp >= since);
     this.outgoing = outgoing.filter((m) => m.timestamp >= since);
@@ -265,6 +268,15 @@ export class Store {
   }
 
   /** Remembers the first successful link of the number (only once). */
+  /**
+   * WhatsApp restricts accounts it suspects of spam: new chats fail, old ones still work
+   * (faq.whatsapp.com/717472490411581). A failed send to a new chat pauses new chats, and it survives restarts.
+   */
+  pauseNewChats(untilMs) {
+    this.pausedUntil = untilMs;
+    this.#write(() => this.kv.set('paused_until', String(untilMs)));
+  }
+
   markLinked(now = Date.now()) {
     if (this.linkedAt) return;
     this.linkedAt = now;
@@ -330,6 +342,9 @@ export function checkSend({ phone, text, store, cfg, now = new Date() }) {
   if (isNew) {
     // WhatsApp is blocked in Russia since February 2026 (RKN removed its domains from the national DNS):
     // most people there see a new chat only with a VPN. Write to them by email; replies still go through.
+    if (store.pausedUntil > now.getTime()) {
+      return { ok: false, status: 429, reason: 'new_chats_paused', until: new Date(store.pausedUntil).toISOString() };
+    }
     const cc = country(d);
     if ((cfg.noNewChatCountries || []).includes(cc)) return { ok: false, status: 451, reason: 'country_blocked', country: cc };
     const dayStart = new Date(now); dayStart.setUTCHours(0, 0, 0, 0);
@@ -385,6 +400,8 @@ export function loadConfig(env = process.env) {
     sameTextLimit: num('SAME_TEXT_LIMIT', 2),
     warmup: env.WARMUP === 'true',
     minReplyRate: num('MIN_REPLY_RATE', 0.1),
+    checkLimit: num('CHECK_LIMIT', 45),        // checkWhatsapp calls a day: no bulk number lookups
+    pauseHours: num('PAUSE_HOURS', 24),
     noNewChatCountries: (env.NO_NEW_CHAT_COUNTRIES ?? 'RU').split(',').map((c) => c.trim().toUpperCase()).filter(Boolean),
   };
   if (cfg.token.length < 16) throw new Error('WAGATE_TOKEN не задан или короче 16 символов (см. .env.example)');
