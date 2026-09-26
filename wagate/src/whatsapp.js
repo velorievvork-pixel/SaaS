@@ -1,7 +1,7 @@
 // WhatsApp connection through Baileys (the WhatsApp Web protocol, linked device).
 // The phone stays the main device: the gateway is one of its "linked devices".
 import makeWASocket, {
-  Browsers, DisconnectReason, fetchLatestBaileysVersion, isJidBroadcast, isJidGroup, isJidNewsletter,
+  Browsers, DisconnectReason, fetchLatestBaileysVersion, isJidBroadcast, isJidGroup, isJidNewsletter, proto,
 } from 'baileys';
 import QRCode from 'qrcode';
 import { useKvAuthState } from './auth.js';
@@ -38,9 +38,12 @@ export class WhatsApp {
       logger: this.logger.child({ module: 'baileys' }, { level: 'warn' }),
       browser: Browsers.ubuntu('Chrome'),
       markOnlineOnConnect: false,          // do not show "online" to everyone all day
-      // Privacy: never pull the phone's chat history, and skip groups, statuses and channels entirely.
+      // Privacy: no full history. Only the initial bootstrap is accepted, because Baileys takes the
+      // phone <-> LID mappings from it (with every type off it warns of session errors). The chats
+      // and texts from it arrive as 'messaging-history.set', which this gateway never listens to,
+      // so nothing from personal chats is kept; only the mappings go to the session keys.
       syncFullHistory: false,
-      shouldSyncHistoryMessage: () => false,
+      shouldSyncHistoryMessage: ({ syncType }) => syncType === proto.HistorySync.HistorySyncType.INITIAL_BOOTSTRAP,
       shouldIgnoreJid: (jid) => Boolean(isJidGroup(jid) || isJidBroadcast(jid) || isJidNewsletter(jid)),
     });
     this.sock = sock;
