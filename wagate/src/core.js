@@ -367,7 +367,7 @@ export function loadConfig(env = process.env) {
   const num = (k, d) => (env[k] === undefined || env[k] === '' ? d : Number(env[k]));
   const cfg = {
     id: env.WAGATE_ID || '1101000001',
-    token: env.WAGATE_TOKEN || '',
+    token: (env.WAGATE_TOKEN || '').trim(),   // a pasted value often ends with a newline
     // On Render the platform proxy has to reach us, so listen on all interfaces there.
     host: env.HOST || (env.RENDER ? '0.0.0.0' : '127.0.0.1'),
     port: num('PORT', 3000),

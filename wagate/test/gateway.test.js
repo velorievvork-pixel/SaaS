@@ -181,6 +181,7 @@ describe('sending rules', () => {
   test('listens on all interfaces only on Render or when asked', () => {
     assert.equal(loadConfig({ WAGATE_TOKEN: TOKEN }).host, '127.0.0.1');
     assert.equal(loadConfig({ WAGATE_TOKEN: TOKEN, RENDER: 'true' }).host, '0.0.0.0');
+    assert.equal(loadConfig({ WAGATE_TOKEN: ` ${TOKEN}\n` }).token, TOKEN);
     assert.equal(loadConfig({ WAGATE_TOKEN: TOKEN, PAIR_PHONE: '+7 701 123-45-67' }).pairPhone, KZ);
   });
   test('weak token is refused at start', () => {
