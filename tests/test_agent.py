@@ -175,6 +175,7 @@ def test_warmup_names_the_giver_with_the_right_verb():
         ("Мы делаем:\n- ЭСФ\n- разноску", "H9"),
         ("**Коротко:** автоматизируем 1С", "H9"),
         ("Спасибо 🙂🙂", "H10"),
+        ("Меня очень впечатлил ваш сайт", "H1"),
     ],
 )
 def test_human_check_catches_bot_and_promo_habits(text, rule):
