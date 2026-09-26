@@ -5,7 +5,7 @@ import makeWASocket, {
 } from 'baileys';
 import QRCode from 'qrcode';
 import { useKvAuthState } from './auth.js';
-import { toGreenMessage, toJid } from './core.js';
+import { toGreenMessage, toJid, typingMs } from './core.js';
 
 export class WhatsApp {
   /**
@@ -125,7 +125,19 @@ export class WhatsApp {
   }
 
   async send(phone, text) {
-    const r = await this.sock.sendMessage(toJid(phone), { text });
+    const jid = toJid(phone);
+    // A person is seen online and "typing…" before the message arrives (~40 ms a character, 2 to 8 s),
+    // then goes offline again. WhatsApp shows typing only from an online account.
+    // Best effort: a failed presence update must not stop the message itself.
+    try {
+      await this.sock.sendPresenceUpdate('available');
+      await this.sock.presenceSubscribe(jid);
+      await this.sock.sendPresenceUpdate('composing', jid);
+      await new Promise((r) => { setTimeout(r, typingMs(text)); });
+      await this.sock.sendPresenceUpdate('paused', jid);
+    } catch (e) { this.logger.warn({ err: e?.message }, 'не удалось показать «печатает»'); }
+    const r = await this.sock.sendMessage(jid, { text });
+    this.sock.sendPresenceUpdate('unavailable').catch(() => {});
     return r?.key?.id || '';
   }
 }

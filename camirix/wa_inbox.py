@@ -123,7 +123,7 @@ def api_call(method, query="", env=None, opener=urllib.request.urlopen, body=Non
                                  headers={"User-Agent": "camirix-wa-inbox",
                                           "Content-Type": "application/json"})
     try:
-        with opener(req, timeout=20) as r:
+        with opener(req, timeout=60) as r:  # Render может просыпаться до минуты
             return json.loads(r.read().decode("utf-8") or "null")
     except urllib.error.HTTPError as e:
         # В тексте ошибки нет URL: в нём токен.
@@ -142,13 +142,17 @@ def message_text(m):
 def match_replies(rows, messages):
     """Входящие из личных чатов с номеров лидов → [{id, company, text, at, ...}]."""
     by_phone = {digits(r.get("phone")): r for r in rows if digits(r.get("phone"))}
+    # Окно опроса (3 часа) больше интервала (1 час): одно сообщение приходит несколько раз.
+    # Уже разобранные агент отмечает в history полем id_message, их не показываем повторно.
+    handled = {str(h.get("id_message")) for r in rows for h in (r.get("history") or [])
+               if h.get("id_message")}
     out = []
     for m in sorted(messages or [], key=lambda x: x.get("timestamp", 0)):
         chat = str(m.get("chatId", ""))
         if not chat.endswith("@c.us"):
             continue  # группы и служебные события
         r = by_phone.get(digits(chat.split("@")[0]))
-        if not r:
+        if not r or (m.get("idMessage") and str(m["idMessage"]) in handled):
             continue
         ts = dt.datetime.fromtimestamp(m.get("timestamp", 0), dt.UTC)
         sent = sent_at(r)

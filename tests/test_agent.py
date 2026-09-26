@@ -133,3 +133,56 @@ def test_record_and_learn_write_files(tmp_path):
     assert "**2026-09-28** (владелец): Писать процесс" in lessons.read_text(encoding="utf-8")
     with pytest.raises(ValueError):
         autonomy.record("first_message", "maybe", path=log)
+
+
+@pytest.mark.parametrize(
+    "category", [c for c in router.TEMPLATES if c not in ("contact_given", "warmup", "forwarded_named")]
+)
+def test_all_reply_templates_sound_human(category):
+    import humanity
+    for d in router.draft(category, {"company": "ТОО «Агротоп»"}, "Меня зовут Радмила"):
+        assert humanity.check(d["text"], "reply", "Здравствуйте, сколько стоит и как это работает у вас?") == []
+
+
+def test_internal_warmup_template_is_not_a_category():
+    assert router.draft("warmup", {}, "") == []
+
+
+@pytest.mark.parametrize(
+    "name,g",
+    [("Илья", "m"), ("Дима", "m"), ("Ерлан", "m"), ("Светлана", "f"), ("Айгерим", "f"),
+     ("Асель", "f"), ("Саша", ""), ("Айнур", ""), ("", "")],
+)
+def test_gender_of_the_person_who_gave_the_number(name, g):
+    assert router.gender(name) == g
+
+
+def test_warmup_names_the_giver_with_the_right_verb():
+    def texts(who, card):
+        msg = f"Меня зовут {who}, вот номер +77011234567 Ерлан"
+        return [d["text"] for d in router.draft("contact_given", card, msg)]
+    assert "мне дал Дима из компании Агротоп" in texts("Дима", {"company": "ТОО «Агротоп»"})[1]
+    assert "мне дала Айгерим из вашей компании" in texts("Айгерим", {})[1]
+    assert "мне дали в вашей компании" in texts("Саша", {})[1]
+
+
+@pytest.mark.parametrize(
+    "text,rule",
+    [
+        ("Успейте получить скидку до конца месяца", "H8"),
+        ("Отличный вопрос! Надеюсь, это поможет.", "H1"),
+        ("Если возникнут вопросы, обращайтесь", "H1"),
+        ("Мы делаем:\n- ЭСФ\n- разноску", "H9"),
+        ("**Коротко:** автоматизируем 1С", "H9"),
+        ("Спасибо 🙂🙂", "H10"),
+    ],
+)
+def test_human_check_catches_bot_and_promo_habits(text, rule):
+    import humanity
+    assert any(r.startswith(rule) for r in humanity.check(text, "reply")), humanity.check(text, "reply")
+
+
+@pytest.mark.parametrize("text", ["Спасибо 🙂", "Вижу, вы акционерное общество", "Сумма 1.5 млн", "Если что, пишите"])
+def test_human_check_leaves_normal_text_alone(text):
+    import humanity
+    assert humanity.check(text, "reply") == []

@@ -446,6 +446,19 @@ class TestWaInbox:
         assert got[1]["text"] == "[audioMessage]"  # голосовое — слушать самому
         assert not got[0]["before_sent"]
 
+    def test_already_handled_reply_is_not_shown_again(self):
+        import copy
+
+        import wa_inbox
+        rows = copy.deepcopy(self.ROWS)
+        msg = {"chatId": "77022432627@c.us", "timestamp": 1790400000, "typeMessage": "textMessage",
+               "textMessage": "Да, интересно", "idMessage": "A1"}
+        assert len(wa_inbox.match_replies(rows, [msg])) == 1
+        for r in rows:
+            if r["id"] == "welding-company-kz":
+                r.setdefault("history", []).append({"text": "Ответ разобран", "id_message": "A1"})
+        assert wa_inbox.match_replies(rows, [msg]) == []
+
     def test_eight_prefix_normalized(self):
         import wa_inbox
         assert wa_inbox.digits("8 (701) 762-06-39") == wa_inbox.digits("+7 701 762 06 39")

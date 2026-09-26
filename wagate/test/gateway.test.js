@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import {
-  Store, checkSend, country, digits, inWorkingHours, isOptOut, loadConfig, phoneFromChatId, toGreenMessage, utcOffset,
+  Store, checkSend, country, typingMs, digits, inWorkingHours, isOptOut, loadConfig, phoneFromChatId, toGreenMessage, utcOffset,
 } from '../src/core.js';
 import { createServer } from '../src/server.js';
 import { FileKV } from '../src/storage.js';
@@ -103,6 +103,19 @@ describe('sending rules', () => {
     const v = checkSend({ phone: KZ2, text: 'a', store, cfg: cfgWith({ minIntervalSec: 120 }), now: TUE_11_ASTANA });
     assert.equal(v.reason, 'too_soon');
     assert.equal(v.retryAfterSec, 90);
+  });
+  test('typing indicator lasts like a person typing, 2 to 8 seconds', () => {
+    assert.deepEqual([typingMs('Да'), typingMs('x'.repeat(100)), typingMs('x'.repeat(1000))], [2000, 4000, 8000]);
+  });
+  test('no new chats to Russian numbers (WhatsApp blocked there), replies still go', () => {
+    const at = new Date('2026-09-29T08:00:00Z');                      // Tue 11:00 Moscow
+    const v = checkSend({ phone: RU, text: 'Здравствуйте', store, cfg: cfgWith(), now: at });
+    assert.deepEqual([v.reason, v.country], ['country_blocked', 'RU']);
+    assert.equal(checkSend({ phone: KZ, text: 'Здравствуйте', store, cfg: cfgWith(), now: at }).ok, true);
+    assert.equal(checkSend({ phone: RU, text: 'x', store, cfg: cfgWith({ noNewChatCountries: [] }), now: at }).ok, true);
+    assert.deepEqual(loadConfig({ WAGATE_TOKEN: TOKEN, NO_NEW_CHAT_COUNTRIES: '' }).noNewChatCountries, []);
+    store.contacted.add(RU);                                          // they wrote first or answered before
+    assert.equal(checkSend({ phone: RU, text: 'Спасибо', store, cfg: cfgWith(), now: at }).ok, true);
   });
   test('same text to the same number within a day is refused', () => {
     out(KZ, TUE_11_ASTANA.getTime() / 1000 - 3600);

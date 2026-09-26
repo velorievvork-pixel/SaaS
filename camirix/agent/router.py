@@ -272,21 +272,52 @@ def cap(text):
     return text[:1].upper() + text[1:]
 
 
+# Мужские имена на -а/-я (иначе «Ваш номер мне дала Дима») и имена, по которым пол не понять.
+MALE_A = {
+    "илья", "никита", "кузьма", "фома", "лука", "савва", "данила", "гаврила", "дима", "миша",
+    "паша", "лёша", "леша", "серёжа", "сережа", "гоша", "ваня", "петя", "федя", "вася", "толя",
+    "коля", "костя", "гриша", "боря", "лёва", "лева", "стёпа", "степа", "вова", "юра",
+    "жора", "рома", "тимоша", "даня", "ярик", "муса", "иса",
+}
+UNISEX = {"саша", "женя", "валя", "шура", "слава", "айнур"}
+# Женские имена без -а/-я на конце (Казахстан, Кыргызстан, Узбекистан и русские).
+FEMALE = {
+    "айгерим", "асель", "анель", "жанар", "гульнар", "шолпан", "жулдыз", "карлыгаш", "бибигуль",
+    "сауле", "айжан", "акмарал", "алтынай", "гульнур", "нургуль", "жибек", "мерей",
+    "дильнур", "гулнор", "дилноз", "нигора", "любовь", "адель", "ассоль", "нинель", "рахель",
+}
+
+
+def gender(name):
+    """→ "m", "f" или "" (непонятно) по имени в именительном падеже."""
+    n = (name or "").strip().lower()
+    if not n or n in UNISEX:
+        return ""
+    if n in FEMALE:
+        return "f"
+    if n in MALE_A or not n.endswith(("а", "я")):
+        return "m"
+    return "f"
+
+
 def draft(category, card, text=""):
     """Черновики: [{"to": "them"|"contact", "text": ...}].
     «…» — место, которое агент дописывает сам."""
     me = their_name(text)
-    fields = {"Hi": hi(me), "company": short_company(card.get("company")) or "вашей компании"}
+    company = short_company(card.get("company"))
+    fields = {"Hi": hi(me), "company": company}
     key = "forwarded_named" if category == "forwarded" and me else category
     tpl = TEMPLATES.get(key)
-    if not tpl:
+    if not tpl or category == "warmup":  # warmup — только второй черновик для contact_given
         return []
     out = [{"to": "them", "text": cap(tpl.format(**fields))}]
     if category == "contact_given":
         who = nominative(contact_name(text, card.get("company") or ""))
-        female = me.endswith(("а", "я"))
-        giver = f"{me} из компании {fields['company']}" if me else f"в компании {fields['company']}"
-        gave = ("дала" if female else "дал") if me else "дали"
+        g = gender(me)
+        # Кто дал номер, работает там же, где новый человек: без названия — «из вашей компании».
+        where = f"компании {company}" if company else "вашей компании"
+        giver = f"{me} из {where}" if g else f"в {where}"
+        gave = {"m": "дал", "f": "дала"}.get(g, "дали")
         warm = str(card.get("warm_question") or "…?")
         out.append(
             {

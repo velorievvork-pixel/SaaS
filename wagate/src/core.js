@@ -295,6 +295,11 @@ export class Store {
  * Decides whether a message may go out now. The cap counts only NEW chats (numbers that never
  * wrote to us and we never wrote to): replies in a live conversation are not cold outreach.
  */
+/** How long to show "typing…" before a message: ~40 ms a character, clamped to 2–8 s. */
+export function typingMs(text, perChar = 40) {
+  return Math.min(8000, Math.max(2000, String(text ?? '').length * perChar));
+}
+
 export function checkSend({ phone, text, store, cfg, now = new Date() }) {
   const d = digits(phone);
   if (d.length < 10 || d.length > 15) return { ok: false, status: 400, reason: 'bad_phone' };
@@ -323,6 +328,10 @@ export function checkSend({ phone, text, store, cfg, now = new Date() }) {
 
   const isNew = !store.contacted.has(d);
   if (isNew) {
+    // WhatsApp is blocked in Russia since February 2026 (RKN removed its domains from the national DNS):
+    // most people there see a new chat only with a VPN. Write to them by email; replies still go through.
+    const cc = country(d);
+    if ((cfg.noNewChatCountries || []).includes(cc)) return { ok: false, status: 451, reason: 'country_blocked', country: cc };
     const dayStart = new Date(now); dayStart.setUTCHours(0, 0, 0, 0);
     const newToday = store.outgoing.filter((m) => m.newChat && m.timestamp >= dayStart.getTime() / 1000).length;
     const limit = dailyNewChatLimit(store, cfg, now);
@@ -376,6 +385,7 @@ export function loadConfig(env = process.env) {
     sameTextLimit: num('SAME_TEXT_LIMIT', 2),
     warmup: env.WARMUP === 'true',
     minReplyRate: num('MIN_REPLY_RATE', 0.1),
+    noNewChatCountries: (env.NO_NEW_CHAT_COUNTRIES ?? 'RU').split(',').map((c) => c.trim().toUpperCase()).filter(Boolean),
   };
   if (cfg.token.length < 16) throw new Error('WAGATE_TOKEN не задан или короче 16 символов (см. .env.example)');
   return cfg;

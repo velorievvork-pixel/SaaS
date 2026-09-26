@@ -94,5 +94,40 @@ class TestSend(unittest.TestCase):
             wa_send.send("77011234567", "x", env={})
 
 
+class MainExitCodes(unittest.TestCase):
+    """Коды возврата main(): агент по ним решает, повторять ли и отдавать ли текст человеку."""
+
+    def run_with(self, result):
+        def fake_send(phone, text):
+            if isinstance(result, Exception):
+                raise result
+            return result
+        orig, wa_send.send = wa_send.send, fake_send
+        buf = io.StringIO()
+        try:
+            sys.stdout, saved = buf, sys.stdout
+            code = wa_send.main(["--phone", "77011234567", "--text", "Спасибо!", "--kind", "reply"])
+        finally:
+            sys.stdout, wa_send.send = saved, orig
+        return code, json.loads(buf.getvalue())
+
+    def test_timeout_may_have_sent_so_no_blind_retry(self):
+        code, o = self.run_with(TimeoutError())
+        self.assertEqual((code, o["error"]), (3, "timeout"))
+        self.assertIn("lastOutgoingMessages", o["meaning"])
+
+    def test_render_waking_up_is_unavailable_not_a_refusal(self):
+        code, _ = self.run_with((502, {}))
+        self.assertEqual(code, 3)
+
+    def test_gateway_refusal_is_explained(self):
+        code, o = self.run_with((451, {"error": "country_blocked", "country": "RU"}))
+        self.assertEqual((code, o["country"]), (2, "RU"))
+        self.assertIn("почту", o["meaning"])
+
+    def test_sent(self):
+        self.assertEqual(self.run_with((200, {"idMessage": "ABC"}))[0], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

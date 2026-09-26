@@ -53,6 +53,7 @@ REASONS = {
     "stop_list": "человек просил не писать, номер в стоп-листе",
     "duplicate_24h": "этот текст уже уходил на этот номер за сутки",
     "no_whatsapp": "на номере нет WhatsApp",
+    "country_blocked": "в России WhatsApp заблокирован (с февраля 2026): новым писать на почту",
     "whatsapp not authorized": "шлюз не привязан к телефону (нужен QR)",
 }
 
@@ -75,7 +76,8 @@ def send(phone, text, env=None, opener=urllib.request.urlopen):
         f"{base}/waInstance{iid}/sendMessage/{token}", data=body, method="POST",
         headers={"Content-Type": "application/json", "User-Agent": "camirix-wa-send"})
     try:
-        with opener(req, timeout=30) as r:
+        # До 8 с «печатает…» и до минуты на пробуждение Render: короткий таймаут — ложный отказ.
+        with opener(req, timeout=90) as r:
             return r.status, json.loads(r.read().decode() or "{}")
     except urllib.error.HTTPError as e:
         try:
@@ -114,12 +116,22 @@ def main(argv=None):
     except LookupError as e:
         out({"ok": False, "stage": "config", "error": str(e)})
         return 3
+    except TimeoutError:
+        # Шлюз мог успеть отправить: повтор или ручная отправка дали бы человеку два сообщения.
+        out({"ok": False, "stage": "gateway", "error": "timeout",
+             "meaning": "шлюз не ответил вовремя, сообщение могло уйти: сначала проверить "
+                        "lastOutgoingMessages, только потом повторять"})
+        return 3
     except OSError as e:
         out({"ok": False, "stage": "gateway", "error": f"шлюз недоступен: {e}"})
         return 3
     if status == 200 and payload.get("idMessage"):
         out({"ok": True, "idMessage": payload["idMessage"]})
         return 0
+    if status >= 500 and not payload.get("error"):
+        out({"ok": False, "stage": "gateway", "status": status,
+             "error": f"шлюз недоступен: HTTP {status}"})
+        return 3
     err = payload.get("error", f"HTTP {status}")
     extra = {k: v for k, v in payload.items() if k != "error"}
     out({"ok": False, "stage": "gateway", "status": status, "error": err,
