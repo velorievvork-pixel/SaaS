@@ -25,6 +25,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import quote
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / ".claude" / "hooks"))
@@ -69,11 +70,12 @@ def send(phone, text, env=None, opener=urllib.request.urlopen):
     env = env if env is not None else os.environ
     base = (env.get("GREEN_API_URL") or DEFAULT_API).rstrip("/")
     iid, token = env.get("GREEN_API_ID"), env.get("GREEN_API_TOKEN")
+    iid, token = (iid or "").strip(), (token or "").strip()
     if not iid or not token:
         raise LookupError("нет GREEN_API_ID / GREEN_API_TOKEN")
     body = json.dumps({"chatId": f"{digits(phone)}@c.us", "message": text}).encode()
     req = urllib.request.Request(
-        f"{base}/waInstance{iid}/sendMessage/{token}", data=body, method="POST",
+        f"{base}/waInstance{iid}/sendMessage/{quote(token, safe='')}", data=body, method="POST",
         headers={"Content-Type": "application/json", "User-Agent": "camirix-wa-send"})
     try:
         # До 8 с «печатает…» и до минуты на пробуждение Render: короткий таймаут — ложный отказ.

@@ -265,6 +265,16 @@ describe('HTTP API (Green-API compatible)', () => {
   test('wrong token', async () => {
     assert.equal((await call('getStateInstance', undefined, 'nope-nope-nope-nope')).status, 401);
   });
+  test('a token with "/", "+" and "=" works when percent-encoded', async () => {
+    const tok = 'ab/cd+ef=gh/ij+kl=mn';
+    const srv = createServer({ cfg: cfgWith({ token: tok }), wa, store, now: () => clock });
+    await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+    const url = `http://127.0.0.1:${srv.address().port}/waInstance1101/getStateInstance/`;
+    assert.equal((await fetch(url + encodeURIComponent(tok))).status, 200);
+    assert.equal((await fetch(url + encodeURIComponent('ab/cd+ef=gh/ij+kl=mX'))).status, 401);
+    assert.equal((await fetch(url + '%E0%A4%A')).status, 401);   // malformed escape: no crash
+    srv.close();
+  });
   test('state and QR', async () => {
     assert.deepEqual(await (await call('getStateInstance')).json(), { stateInstance: 'authorized' });
     assert.equal((await (await call('qr')).json()).type, 'alreadyLogged');

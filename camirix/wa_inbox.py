@@ -30,6 +30,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import quote
 
 SILENT_AFTER_WORKDAYS = 3
 READ_ONLY = {"getStateInstance", "lastIncomingMessages"}
@@ -115,9 +116,11 @@ def api_call(method, query="", env=None, opener=urllib.request.urlopen, body=Non
     env = env if env is not None else os.environ
     base = (env.get("GREEN_API_URL") or DEFAULT_API).rstrip("/")
     iid, token = env.get("GREEN_API_ID"), env.get("GREEN_API_TOKEN")
+    iid, token = (iid or "").strip(), (token or "").strip()
     if not iid or not token:
         raise LookupError("нет секретов GREEN_API_ID / GREEN_API_TOKEN")
-    url = f"{base}/waInstance{iid}/{method}/{token}" + (f"?{query}" if query else "")
+    url = f"{base}/waInstance{iid}/{method}/{quote(token, safe='')}"
+    url += f"?{query}" if query else ""
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method="POST" if data else "GET",
                                  headers={"User-Agent": "camirix-wa-inbox",

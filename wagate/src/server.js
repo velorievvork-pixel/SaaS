@@ -58,7 +58,10 @@ export function createHandler({ cfg, wa, store, now = () => new Date(), log = ()
 
     const m = url.pathname.match(route);
     if (!m) return send(404, { error: 'not found' });
-    const [, method, token, extra] = m;
+    const [, method, rawToken, extra] = m;
+    // Render's "Generate" can put "/", "+" or "=" in the token: clients send it percent-encoded.
+    let token = rawToken;
+    try { token = decodeURIComponent(rawToken); } catch { /* malformed escape: compared as is */ }
     if (!safeEqual(token, cfg.token)) return send(401, { error: 'bad token' });
 
     const needAuth = () => {
