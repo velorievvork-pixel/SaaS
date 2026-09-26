@@ -94,6 +94,22 @@ class TestSend(unittest.TestCase):
             wa_send.send("77011234567", "x", env={})
 
 
+class LocalHour(unittest.TestCase):
+    def test_by_country(self):
+        import datetime as dt
+        at = dt.datetime(2026, 9, 28, 6, 0, tzinfo=dt.UTC)
+        self.assertEqual(wa_send.local_hour("+7 701 123 45 67", at), 11)   # Казахстан UTC+5
+        self.assertEqual(wa_send.local_hour("79161234567", at), 9)         # Россия UTC+3
+        self.assertEqual(wa_send.local_hour("996555123456", at), 12)       # Кыргызстан UTC+6
+        self.assertIsNone(wa_send.local_hour("12025550100", at))
+
+    def test_wrong_greeting_for_their_time_is_blocked(self):
+        import datetime as dt
+        at = dt.datetime(2026, 9, 28, 10, 0, tzinfo=dt.UTC)                # 15:00 в Астане
+        reasons = wa_send.guard("Доброе утро! Спасибо.", "reply", phone="77011234567", now=at)
+        self.assertTrue(any(r.startswith("H12") for r in reasons), reasons)
+
+
 class MainExitCodes(unittest.TestCase):
     """Коды возврата main(): агент по ним решает, повторять ли и отдавать ли текст человеку."""
 

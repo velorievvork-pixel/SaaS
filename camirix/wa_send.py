@@ -19,6 +19,7 @@ GREEN_API_ID, GREEN_API_TOKEN.
 2 — шлюз отказал (лимит, часы, стоп-лист, нет WhatsApp), 3 — нет настроек или шлюз недоступен.
 """
 import argparse
+import datetime as dt
 import json
 import os
 import sys
@@ -59,10 +60,30 @@ REASONS = {
 }
 
 
-def guard(text, kind, their_text=""):
+# Смещение от UTC по коду страны (как в шлюзе, wagate/src/core.js): для проверки приветствия.
+UTC_OFFSET = [("7", 3), ("375", 3), ("374", 4), ("994", 4), ("995", 4), ("998", 5),
+              ("992", 5), ("993", 5), ("996", 6), ("373", 3)]
+
+
+def local_hour(phone, now=None):
+    """Час у адресата по номеру или None. Казахстан (+7 6xx/7xx) — UTC+5, Россия — UTC+3."""
+    d = digits(phone)
+    if not d:
+        return None
+    now = now or dt.datetime.now(dt.UTC)
+    if d.startswith(("76", "77")):
+        off = 5
+    else:
+        off = next((o for code, o in sorted(UTC_OFFSET, key=lambda x: -len(x[0]))
+                    if d.startswith(code)), None)
+    return None if off is None else (now + dt.timedelta(hours=off)).hour
+
+
+def guard(text, kind, their_text="", phone=None, now=None):
     """Причины не отправлять (пусто — можно): правила писем и «пишет как человек» (voice.md)."""
     rules = [r for r in check_send({"body": text, "to": []}) if not r.startswith(SKIP[kind])]
-    return rules + humanity.check(text, kind, their_text)
+    hour = local_hour(phone, now) if phone else None
+    return rules + humanity.check(text, kind, their_text, local_hour=hour)
 
 
 def send(phone, text, env=None, opener=urllib.request.urlopen):
@@ -106,7 +127,7 @@ def main(argv=None):
     text = a.text if a.text is not None else Path(a.file).read_text(encoding="utf-8")
     text = text.strip()
 
-    problems = guard(text, a.kind, a.their)
+    problems = guard(text, a.kind, a.their, phone=a.phone)
     if problems:
         out({"ok": False, "stage": "guard", "reasons": problems})
         return 1

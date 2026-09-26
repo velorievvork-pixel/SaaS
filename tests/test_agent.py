@@ -187,3 +187,30 @@ def test_human_check_catches_bot_and_promo_habits(text, rule):
 def test_human_check_leaves_normal_text_alone(text):
     import humanity
     assert humanity.check(text, "reply") == []
+
+
+@pytest.mark.parametrize(
+    "text,hour,bad",
+    [
+        ("Доброе утро! Спасибо.", 15, True),
+        ("Доброе утро! Спасибо.", 9, False),
+        ("Добрый вечер, спасибо!", 11, True),
+        ("Спасибо, хорошего дня!", 18, True),
+        ("Спасибо, хорошего дня!", 10, False),
+    ],
+)
+def test_greeting_matches_the_recipients_time(text, hour, bad):
+    import humanity
+    got = [r for r in humanity.check(text, "reply", local_hour=hour) if r.startswith("H12")]
+    assert bool(got) == bad, got
+
+
+def test_business_messages_use_vy():
+    import humanity
+    assert any(r.startswith("H11") for r in humanity.check("Спасибо, пришлю тебе подробнее", "reply"))
+    assert humanity.check("Спасибо, пришлю вам подробнее", "reply") == []
+
+
+def test_kazakh_reply_is_flagged():
+    assert router.route("Рахмет, қазір уақыт жоқ")["language"] == "kk"
+    assert router.route("Спасибо, сейчас нет времени")["language"] == "ru"

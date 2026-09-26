@@ -332,6 +332,15 @@ def draft(category, card, text=""):
     return out
 
 
+# Буквы, которых нет в русском: человек пишет по-казахски.
+KAZAKH = re.compile(r"[әғқңөұүһӘҒҚҢӨҰҮҺ]")
+
+
+def language(text):
+    """"kk", если в тексте казахские буквы, иначе "ru"."""
+    return "kk" if len(KAZAKH.findall(text or "")) >= 2 else "ru"
+
+
 def route(text, lead=None):
     category, contacts = classify(text)
     card = load_card(lead)
@@ -342,6 +351,7 @@ def route(text, lead=None):
         "status": STATUS.get(category, "replied"),
         "contacts": contacts,
         "their_name": their_name(text),
+        "language": language(text),
         "contact_name": contact_name(text, card.get("company") or ""),
         "drafts": drafts,
         "draft": drafts[0]["text"] if drafts else "",

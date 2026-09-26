@@ -69,8 +69,17 @@ def words(text):
     return len(re.findall(r"[\wЀ-ӿ]+", text or ""))
 
 
-def check(text, kind="first", their_text=""):
-    """→ список замечаний (пусто — звучит по-человечески)."""
+# Приветствие не по времени адресата («Доброе утро» в 15:00) сразу выдаёт рассылку.
+MORNING = re.compile(r"доброе утро")
+EVENING = re.compile(r"добрый вечер")
+NICE_DAY = re.compile(r"хорошего дня")
+# Незнакомому человеку по делу — на «вы», даже если он пишет на «ты».
+TY = re.compile(r"\b(ты|тебе|тебя|тобой|твой|твоя|твоё|твое|твои|твоих)\b")
+
+
+def check(text, kind="first", their_text="", local_hour=None):
+    """→ список замечаний (пусто — звучит по-человечески).
+    local_hour — час у адресата (0–23), если известен: проверяется приветствие."""
     t = (text or "").strip()
     low = t.lower()
     out = []
@@ -105,6 +114,15 @@ def check(text, kind="first", their_text=""):
             "H8 рекламный приём (скидка, акция, «успейте»): писать как личное деловое "
             "предложение этой компании, без призывов (38-ФЗ ст. 18)"
         )
+    if TY.search(low):
+        out.append("H11 на «ты»: незнакомому человеку по делу пишут на «вы»")
+    if local_hour is not None:
+        if MORNING.search(low) and local_hour >= 12:
+            out.append(f"H12 «доброе утро», а у адресата {local_hour}:00 → «добрый день»")
+        if EVENING.search(low) and local_hour < 17:
+            out.append(f"H12 «добрый вечер», а у адресата {local_hour}:00 → «добрый день»")
+        if NICE_DAY.search(low) and local_hour >= 17:
+            out.append(f"H12 «хорошего дня», а у адресата {local_hour}:00 → «хорошего вечера»")
     if len(re.findall(r"(?i)\bподскажите\b", t)) > 1:
         out.append("H5 «подскажите» дважды в одном сообщении")
     return out
