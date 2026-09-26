@@ -8,7 +8,7 @@
 graduate_after: 5
 
 actions:
-  first_message:      learn   # первое сообщение новому лиду (WhatsApp или почта)
+  first_message:      auto   # первое сообщение новому лиду (WhatsApp или почта)
   followup:           learn   # второе касание через 3 рабочих дня тишины
   reply_refusal:      learn   # «не интересует» → одна вежливая фраза и статус «Отказ»
   reply_opt_out:      auto    # «не пишите» → ничего не пишем, стоп-лист, статус «Отказ»
